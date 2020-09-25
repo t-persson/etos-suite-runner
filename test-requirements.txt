@@ -1,0 +1,4 @@
+mock
+pytest
+pytest-cov
+pact-python==0.19.0
