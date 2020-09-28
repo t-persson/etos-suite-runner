@@ -20,4 +20,4 @@ requests==2.24.0
 packageurl-python==0.9.1
 graphql-core==2.2.1
 eiffellib==1.1.0
-etos-lib==1.2.0
+etos_lib==1.0.0
