@@ -1,17 +1,20 @@
-FROM python:3.8.3
+FROM python:3.8.3-buster AS build
 
-ARG PIP_ARGS
+COPY . /src
+WORKDIR /src
+RUN python3 setup.py bdist_wheel
 
-RUN useradd -ms /bin/bash etos
+FROM python:3.8.3-slim-buster
+
+COPY --from=build /src/dist/*.whl /tmp
+# hadolint ignore=DL3013
+RUN pip install --no-cache-dir /tmp/*.whl
+
+RUN groupadd -r etos && useradd -r -s /bin/false -g etos etos
 USER etos
 
-ENV PATH="/home/etos/.local/bin:${PATH}"
+LABEL org.opencontainers.image.source=https://github.com/eiffel-community/etos-suite-runner
+LABEL org.opencontainers.image.authors=etos-maintainers@googlegroups.com
+LABEL org.opencontainers.image.licenses=Apache-2.0
 
-RUN pip install $PIP_ARGS --upgrade pip
-WORKDIR /usr/src/app/src
 CMD ["python", "-u", "-m", "etos_suite_runner", "-v"]
-
-COPY requirements.txt /requirements.txt
-RUN pip install $PIP_ARGS -r /requirements.txt
-
-COPY . /usr/src/app
