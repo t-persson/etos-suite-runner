@@ -21,7 +21,7 @@ Installation
 Contribute
 ==========
 
-- Issue Tracker: https://github.com/eiffel-community/etos-suite-runner/issues
+- Issue Tracker: https://github.com/eiffel-community/etos/issues
 - Source Code: https://github.com/eiffel-community/etos-suite-runner
 
 
