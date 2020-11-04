@@ -2,6 +2,12 @@
 Changelog
 =========
 
+Version 1.3.0
+-------------
+
+- 985a788 Update etos library to version 1.3.0
+- 99f2fb4 Upgrade suite runner to python 3.9.0 (#13)
+
 Version 1.2.0
 -------------
 
