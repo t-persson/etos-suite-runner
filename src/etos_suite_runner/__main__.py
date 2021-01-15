@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2020 Axis Communications AB.
+# Copyright 2020-2021 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -16,15 +16,13 @@
 # limitations under the License.
 # -*- coding: utf-8 -*-
 """ETOS suite runner module."""
-import argparse
-import sys
 import os
 import logging
 import traceback
 import signal
 
 from etos_lib import ETOS
-from etos_suite_runner import __version__
+from etos_lib.logging.logger import FORMAT_CONFIG
 
 from etos_suite_runner.lib.runner import SuiteRunner
 from etos_suite_runner.lib.esr_parameters import ESRParameters
@@ -60,6 +58,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         )
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
+        FORMAT_CONFIG.identifier = self.params.tercc.meta.event_id
 
         self.etos.config.rabbitmq_publisher_from_environment()
         self.etos.start_publisher()
@@ -264,60 +263,8 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         raise Exception("Terminate command received - Shutting down.")
 
 
-def parse_args(args):
-    """Parse command line parameters.
-
-    Args:
-      args ([str]): command line parameters as list of strings
-
-    Returns:
-      :obj:`argparse.Namespace`: command line parameters namespace
-    """
-    parser = argparse.ArgumentParser(description="ETOS suite runner")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version="etos_suite_runner {ver}".format(ver=__version__),
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        dest="loglevel",
-        help="set loglevel to INFO",
-        action="store_const",
-        const=logging.INFO,
-    )
-    parser.add_argument(
-        "-vv",
-        "--very-verbose",
-        dest="loglevel",
-        help="set loglevel to DEBUG",
-        action="store_const",
-        const=logging.DEBUG,
-    )
-    return parser.parse_args(args)
-
-
-def setup_logging(loglevel):
-    """Set up basic logging.
-
-    Args:
-      loglevel (int): minimum loglevel for emitting messages
-    """
-    logformat = "[%(asctime)s] %(levelname)s:%(name)s:%(message)s"
-    logging.basicConfig(
-        level=loglevel, stream=sys.stdout, format=logformat, datefmt="%Y-%m-%d %H:%M:%S"
-    )
-
-
-def main(args):
-    """Entry point allowing external calls.
-
-    Args:
-      args ([str]): command line parameter list
-    """
-    args = parse_args(args)
-    setup_logging(args.loglevel)
+def main():
+    """Entry point allowing external calls."""
     esr = ESR()
     try:
         esr.run()  # Blocking
@@ -332,7 +279,7 @@ def main(args):
 
 def run():
     """Entry point for console_scripts."""
-    main(sys.argv[1:])
+    main()
 
 
 if __name__ == "__main__":

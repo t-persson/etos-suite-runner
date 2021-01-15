@@ -17,4 +17,4 @@ LABEL org.opencontainers.image.source=https://github.com/eiffel-community/etos-s
 LABEL org.opencontainers.image.authors=etos-maintainers@googlegroups.com
 LABEL org.opencontainers.image.licenses=Apache-2.0
 
-CMD ["python", "-u", "-m", "etos_suite_runner", "-v"]
+CMD ["python", "-u", "-m", "etos_suite_runner"]
