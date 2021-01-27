@@ -2,6 +2,13 @@
 Changelog
 =========
 
+Version 1.9.0
+-------------
+
+- 2015092 Update etos library to version 1.9.0
+- 3e33177 Remove eiffellib requirement. (#15)
+- 3a78717 Enable logging for ESR (#14)
+
 Version 1.8.0
 -------------
 
