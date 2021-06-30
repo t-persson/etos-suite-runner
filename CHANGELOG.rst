@@ -2,6 +2,11 @@
 Changelog
 =========
 
+Version 1.18.0
+--------------
+
+- f304c86 Update etos library to version 1.18.0
+
 Version 1.17.0
 --------------
 
