@@ -1,4 +1,4 @@
-# Copyright 2020 Axis Communications AB.
+# Copyright 2020-2021 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -24,6 +24,10 @@ from etos_suite_runner.lib.executor import Executor
 
 class SuiteRunner:
     """Test suite runner.
+
+    Feature flag:
+        If feature flag CLM is set to false, then this class
+        will not send confidence levels.
 
     Splits test suites into sub suites based on number of products available.
     Starts ETOS test runner (ETR) and sends out a confidence level.
@@ -57,6 +61,8 @@ class SuiteRunner:
         :param environment: Environment in which the test suite was run.
         :type environment: dict
         """
+        self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+                            "Set feature flag CLM to false in order to disable this deprecated feature.")
         links = {
             "CONTEXT": self.context,
             "CAUSE": test_suite_started,
@@ -148,7 +154,8 @@ class SuiteRunner:
         try:
             self._run_etr_and_wait(environment)
             verdict, conclusion, description = self.result_handler.test_results()
-            self.confidence_level(test_suite_started, environment)
+            if self.etos.feature_flags.clm:
+                self.confidence_level(test_suite_started, environment)
             time.sleep(5)
         except Exception as exc:
             conclusion = "FAILED"

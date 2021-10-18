@@ -1,4 +1,4 @@
-# Copyright 2020 Axis Communications AB.
+# Copyright 2020-2021 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -45,6 +45,10 @@ class ResultHandler:
     def has_finished(self):
         """Whether or not test suites have finished.
 
+        Feature flag:
+            If feature flag CLM is set to false, then this method does
+            not wait for subConfidence levels.
+
         :return: If tests have started, there are subSuitesFinished and subConfidence levels,
                  the number of subConfidence levels are equal to the number of expected
                  test suites and the number of subSuitesFinished are equal to the number
@@ -55,14 +59,20 @@ class ResultHandler:
             return False
         if not self.events.get("subSuiteFinished"):
             return False
-        if not self.events.get("subConfidenceLevelModified"):
-            return False
-        nbr_of_confidence = len(self.events.get("subConfidenceLevelModified"))
         nbr_of_finished = len(self.events.get("subSuiteFinished"))
         expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-        if nbr_of_confidence != expected_number_of_suites:
-            return False
-        return nbr_of_confidence == nbr_of_finished
+
+        if self.etos.feature_flags.clm:
+            self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+                                "Set feature flag CLM to false in order to disable this deprecated feature.")
+            if not self.events.get("subConfidenceLevelModified"):
+                return False
+            nbr_of_confidence = len(self.events.get("subConfidenceLevelModified"))
+            if nbr_of_confidence != expected_number_of_suites:
+                return False
+            return nbr_of_confidence == nbr_of_finished
+        else:
+            return nbr_of_finished == expected_number_of_suites
 
     @property
     def test_suites_finished(self):
@@ -168,21 +178,24 @@ class ResultHandler:
             self.events["subSuiteFinished"] = finished
         events["subSuiteFinished"] = self.events.get("subSuiteFinished", [])
 
-        if (
-            len(self.events.get("subConfidenceLevelModified", []))
-            != expected_number_of_suites
-        ):
-            self.logger.info("Getting subConfidenceLevelModified")
-            confidence = list(request_confidence_level(self.etos, started_ids))
-            if not confidence:
-                self.logger.info("No sub suite subConfidenceLevelModified")
-                self.events = events
-                return
-            self.logger.info("Found: %r", len(confidence))
-            self.events["subConfidenceLevelModified"] = confidence
-        events["subConfidenceLevelModified"] = self.events.get(
-            "subConfidenceLevelModified", []
-        )
+        if self.etos.feature_flags.clm:
+            self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+                                "Set feature flag CLM to false in order to disable this deprecated feature.")
+            if (
+                len(self.events.get("subConfidenceLevelModified", []))
+                != expected_number_of_suites
+            ):
+                self.logger.info("Getting subConfidenceLevelModified")
+                confidence = list(request_confidence_level(self.etos, started_ids))
+                if not confidence:
+                    self.logger.info("No sub suite subConfidenceLevelModified")
+                    self.events = events
+                    return
+                self.logger.info("Found: %r", len(confidence))
+                self.events["subConfidenceLevelModified"] = confidence
+            events["subConfidenceLevelModified"] = self.events.get(
+                "subConfidenceLevelModified", []
+            )
         self.events = events
 
     def wait_for_test_suite_finished(self):
