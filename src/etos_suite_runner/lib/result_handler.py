@@ -16,6 +16,7 @@
 """ETOS suite runner result handler module."""
 import time
 import logging
+from .log_filter import DuplicateFilter
 from .graphql import (
     request_activity,
     request_confidence_level,
@@ -138,7 +139,7 @@ class ResultHandler:
             self.activity_id = activity["meta"]["id"]
 
         expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-        self.logger.info("Execpted number of suites: %r", expected_number_of_suites)
+        self.logger.info("Expected number of suites: %r", expected_number_of_suites)
 
         events = {
             "subSuiteStarted": [],
@@ -207,24 +208,25 @@ class ResultHandler:
 
         timeout = time.time() + self.etos.debug.default_test_result_timeout
         print_once = False
-        while time.time() < timeout:
-            time.sleep(10)
-            self.get_events(tercc.meta.event_id)
-            expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-            self.logger.info(
-                "Expected number of test suites: %r, currently active: %r",
-                expected_number_of_suites,
-                len(self.events.get("subSuiteStarted", [])),
-            )
-            if not self.has_started:
-                continue
-            if not print_once:
-                print_once = True
-                self.logger.info("Test suites have started.")
-            if self.has_finished:
-                self.logger.info("Test suites have finished.")
-                self.etos.config.set("results", self.events)
-                return True
+        with DuplicateFilter(self.logger):
+            while time.time() < timeout:
+                time.sleep(10)
+                self.get_events(tercc.meta.event_id)
+                expected_number_of_suites = self.etos.config.get("nbr_of_suites")
+                self.logger.info(
+                    "Expected number of test suites: %r, currently active: %r",
+                    expected_number_of_suites,
+                    len(self.events.get("subSuiteStarted", [])),
+                )
+                if not self.has_started:
+                    continue
+                if not print_once:
+                    print_once = True
+                    self.logger.info("Test suites have started.")
+                if self.has_finished:
+                    self.logger.info("Test suites have finished.")
+                    self.etos.config.set("results", self.events)
+                    return True
 
-            self.logger.info("Waiting for test suites to finish.")
+                self.logger.info("Waiting for test suites to finish.")
         return False
