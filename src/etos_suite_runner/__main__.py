@@ -125,8 +125,9 @@ class ESR:  # pylint:disable=too-many-instance-attributes
                 return None, result.get("error")
             return (
                 None,
-                "Unknown Error: Did not receive an environment within {}s".format(
-                    self.etos.debug.default_http_timeout
+                (
+                    "Unknown Error: Did not receive an environment "
+                    f"within {self.etos.debug.default_http_timeout}s"
                 ),
             )
         return environment, ""
@@ -269,7 +270,7 @@ def main():
     try:
         esr.run()  # Blocking
     except:
-        with open("/dev/termination-log", "w") as termination_log:
+        with open("/dev/termination-log", "w", encoding="utf-8") as termination_log:
             termination_log.write(traceback.format_exc())
         raise
     finally:

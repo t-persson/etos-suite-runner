@@ -1,4 +1,4 @@
-# Copyright 2020 Axis Communications AB.
+# Copyright 2020-2021 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -91,8 +91,7 @@ def request_test_suite_finished(etos, test_suite_ids):
     or_query = "{'$or': ["
     or_query += ", ".join(
         [
-            "{'links.type': 'TEST_SUITE_EXECUTION', 'links.target': '%s'}"
-            % test_suite_id
+            f"{{'links.type': 'TEST_SUITE_EXECUTION', 'links.target': '{test_suite_id}'}}"
             for test_suite_id in test_suite_ids
         ]
     )
@@ -120,7 +119,7 @@ def request_confidence_level(etos, test_suite_ids):
     or_query = "{'$or': ["
     or_query += ", ".join(
         [
-            "{'links.type': 'CAUSE', 'links.target': '%s'}" % test_suite_id
+            f"{{'links.type': 'CAUSE', 'links.target': '{test_suite_id}'}}"
             for test_suite_id in test_suite_ids
         ]
     )

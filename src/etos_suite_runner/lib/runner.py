@@ -61,8 +61,10 @@ class SuiteRunner:
         :param environment: Environment in which the test suite was run.
         :type environment: dict
         """
-        self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-                            "Set feature flag CLM to false in order to disable this deprecated feature.")
+        self.logger.warning(
+            "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+            "Set feature flag CLM to false in order to disable this deprecated feature."
+        )
         links = {
             "CONTEXT": self.context,
             "CAUSE": test_suite_started,

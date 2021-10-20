@@ -8,9 +8,7 @@ FROM python:3.9.0-slim-buster
 
 COPY --from=build /src/dist/*.whl /tmp
 # hadolint ignore=DL3013
-RUN pip install --no-cache-dir /tmp/*.whl
-
-RUN groupadd -r etos && useradd -r -s /bin/false -g etos etos
+RUN pip install --no-cache-dir /tmp/*.whl && groupadd -r etos && useradd -r -s /bin/false -g etos etos
 USER etos
 
 LABEL org.opencontainers.image.source=https://github.com/eiffel-community/etos-suite-runner

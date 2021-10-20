@@ -63,16 +63,17 @@ class ResultHandler:
         expected_number_of_suites = self.etos.config.get("nbr_of_suites")
 
         if self.etos.feature_flags.clm:
-            self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-                                "Set feature flag CLM to false in order to disable this deprecated feature.")
+            self.logger.warning(
+                "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+                "Set feature flag CLM to false in order to disable this deprecated feature."
+            )
             if not self.events.get("subConfidenceLevelModified"):
                 return False
             nbr_of_confidence = len(self.events.get("subConfidenceLevelModified"))
             if nbr_of_confidence != expected_number_of_suites:
                 return False
             return nbr_of_confidence == nbr_of_finished
-        else:
-            return nbr_of_finished == expected_number_of_suites
+        return nbr_of_finished == expected_number_of_suites
 
     @property
     def test_suites_finished(self):
@@ -179,8 +180,10 @@ class ResultHandler:
         events["subSuiteFinished"] = self.events.get("subSuiteFinished", [])
 
         if self.etos.feature_flags.clm:
-            self.logger.warning("DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-                                "Set feature flag CLM to false in order to disable this deprecated feature.")
+            self.logger.warning(
+                "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
+                "Set feature flag CLM to false in order to disable this deprecated feature."
+            )
             if (
                 len(self.events.get("subConfidenceLevelModified", []))
                 != expected_number_of_suites
