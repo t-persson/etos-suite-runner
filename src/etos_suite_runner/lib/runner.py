@@ -22,15 +22,11 @@ from etos_suite_runner.lib.result_handler import ResultHandler
 from etos_suite_runner.lib.executor import Executor
 
 
-class SuiteRunner:
+class SuiteRunner:  # pylint:disable=too-few-public-methods
     """Test suite runner.
 
-    Feature flag:
-        If feature flag CLM is set to false, then this class
-        will not send confidence levels.
-
     Splits test suites into sub suites based on number of products available.
-    Starts ETOS test runner (ETR) and sends out a confidence level.
+    Starts ETOS test runner (ETR) and sends out a test suite finished.
     """
 
     test_suite_started = None
@@ -52,45 +48,6 @@ class SuiteRunner:
         self.result_handler = ResultHandler(self.etos)
 
         self.context = context
-
-    def confidence_level(self, test_suite_started, environment):
-        """Publish a confidence level modified based on sub confidences.
-
-        :param test_suite_started: Test suite to set as CAUSE for this confidence.
-        :type test_suite_started: :obj:`eiffel.events.EiffelTestSuiteStartedEvent`
-        :param environment: Environment in which the test suite was run.
-        :type environment: dict
-        """
-        self.logger.warning(
-            "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-            "Set feature flag CLM to false in order to disable this deprecated feature."
-        )
-        links = {
-            "CONTEXT": self.context,
-            "CAUSE": test_suite_started,
-            "SUBJECT": self.params.artifact_created["meta"]["id"],
-        }
-
-        failures, inconclusives = 0, 0
-        for sub_confidence in self.result_handler.confidence_levels:
-            links.setdefault("SUB_CONFIDENCE_LEVEL", [])
-            links["SUB_CONFIDENCE_LEVEL"].append(sub_confidence["meta"]["id"])
-
-            if sub_confidence["data"]["value"] == "FAILURE":
-                failures += 1
-            elif sub_confidence["data"]["value"] == "INCONCLUSIVE":
-                inconclusives += 1
-
-        if failures == 0 and inconclusives == 0:
-            value = "SUCCESS"
-        elif failures >= inconclusives:
-            value = "FAILURE"
-        else:
-            value = "INCONCLUSIVE"
-
-        self.etos.events.send_confidence_level_modified(
-            environment.get("suite_name"), value, links, issuer=self.params.issuer
-        )
 
     def _run_etr_and_wait(self, environment):
         """Run ETR based on number of IUTs and wait for them to finish.
@@ -156,8 +113,6 @@ class SuiteRunner:
         try:
             self._run_etr_and_wait(environment)
             verdict, conclusion, description = self.result_handler.test_results()
-            if self.etos.feature_flags.clm:
-                self.confidence_level(test_suite_started, environment)
             time.sleep(5)
         except Exception as exc:
             conclusion = "FAILED"

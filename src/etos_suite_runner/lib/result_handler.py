@@ -19,7 +19,6 @@ import logging
 from .log_filter import DuplicateFilter
 from .graphql import (
     request_activity,
-    request_confidence_level,
     request_test_suite_finished,
     request_test_suite_started,
 )
@@ -46,14 +45,8 @@ class ResultHandler:
     def has_finished(self):
         """Whether or not test suites have finished.
 
-        Feature flag:
-            If feature flag CLM is set to false, then this method does
-            not wait for subConfidence levels.
-
-        :return: If tests have started, there are subSuitesFinished and subConfidence levels,
-                 the number of subConfidence levels are equal to the number of expected
-                 test suites and the number of subSuitesFinished are equal to the number
-                 of subConfidence levels, then we return True.
+        :return: If tests have started and there are subSuitesFinished equal to the
+                 number of expected test suites, then we return True.
         :rtype: bool
         """
         if not self.has_started:
@@ -62,18 +55,6 @@ class ResultHandler:
             return False
         nbr_of_finished = len(self.events.get("subSuiteFinished"))
         expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-
-        if self.etos.feature_flags.clm:
-            self.logger.warning(
-                "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-                "Set feature flag CLM to false in order to disable this deprecated feature."
-            )
-            if not self.events.get("subConfidenceLevelModified"):
-                return False
-            nbr_of_confidence = len(self.events.get("subConfidenceLevelModified"))
-            if nbr_of_confidence != expected_number_of_suites:
-                return False
-            return nbr_of_confidence == nbr_of_finished
         return nbr_of_finished == expected_number_of_suites
 
     @property
@@ -81,12 +62,6 @@ class ResultHandler:
         """Iterate over all finished test suites."""
         for test_suite_finished in self.events.get("subSuiteFinished"):
             yield test_suite_finished
-
-    @property
-    def confidence_levels(self):
-        """Iterate over all confidence levels."""
-        for confidence_level in self.events.get("subConfidenceLevelModified"):
-            yield confidence_level
 
     def test_results(self):
         """Test results for the ESR execution.
@@ -144,7 +119,6 @@ class ResultHandler:
         events = {
             "subSuiteStarted": [],
             "subSuiteFinished": [],
-            "subConfidenceLevelModified": [],
         }
         main_suite = self.etos.config.get("test_suite_started")
         self.logger.info("Main suite: %r", main_suite["meta"]["id"])
@@ -179,27 +153,6 @@ class ResultHandler:
             self.logger.info("Found: %r", len(finished))
             self.events["subSuiteFinished"] = finished
         events["subSuiteFinished"] = self.events.get("subSuiteFinished", [])
-
-        if self.etos.feature_flags.clm:
-            self.logger.warning(
-                "DEPRECATED: Please note that confidence levels are deprecated in ETOS.\n"
-                "Set feature flag CLM to false in order to disable this deprecated feature."
-            )
-            if (
-                len(self.events.get("subConfidenceLevelModified", []))
-                != expected_number_of_suites
-            ):
-                self.logger.info("Getting subConfidenceLevelModified")
-                confidence = list(request_confidence_level(self.etos, started_ids))
-                if not confidence:
-                    self.logger.info("No sub suite subConfidenceLevelModified")
-                    self.events = events
-                    return
-                self.logger.info("Found: %r", len(confidence))
-                self.events["subConfidenceLevelModified"] = confidence
-            events["subConfidenceLevelModified"] = self.events.get(
-                "subConfidenceLevelModified", []
-            )
         self.events = events
 
     def wait_for_test_suite_finished(self):

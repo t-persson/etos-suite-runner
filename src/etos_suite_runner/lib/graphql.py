@@ -16,7 +16,6 @@
 """Graphql query handler module."""
 from .graphql_queries import (
     ACTIVITY_TRIGGERED,
-    CONFIDENCE_LEVEL,
     TEST_SUITE_STARTED,
     TEST_SUITE_FINISHED,
 )
@@ -102,33 +101,5 @@ def request_test_suite_finished(etos, test_suite_ids):
                 response, "testSuiteFinished"
             ):
                 yield test_suite_finished
-            return None  # StopIteration
-    return None  # StopIteration
-
-
-def request_confidence_level(etos, test_suite_ids):
-    """Request confidence levels from graphql.
-
-    :param etos: ETOS client instance.
-    :type etos: :obj:`etos_lib.etos.Etos`
-    :param test_suite_ids: list of test suite started IDs of which confidences to search for.
-    :type test_suite_ids: list
-    :return: Iterator of confidence level modified graphql responses.
-    :rtype: iterator
-    """
-    or_query = "{'$or': ["
-    or_query += ", ".join(
-        [
-            f"{{'links.type': 'CAUSE', 'links.target': '{test_suite_id}'}}"
-            for test_suite_id in test_suite_ids
-        ]
-    )
-    or_query += "]}"
-    for response in request(etos, CONFIDENCE_LEVEL % or_query):
-        if response:
-            for _, confidence_level in etos.graphql.search_for_nodes(
-                response, "confidenceLevelModified"
-            ):
-                yield confidence_level
             return None  # StopIteration
     return None  # StopIteration
