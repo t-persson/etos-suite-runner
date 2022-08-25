@@ -18,7 +18,6 @@ import time
 import logging
 from .log_filter import DuplicateFilter
 from .graphql import (
-    request_activity,
     request_test_suite_finished,
     request_test_suite_started,
 )
@@ -27,19 +26,24 @@ from .graphql import (
 class ResultHandler:
     """ESR test result handler."""
 
-    activity_id = None
-    logger = logging.getLogger("ESR - ResultHandler")
+    results = None
+    expected_number_of_suites = 0
 
-    def __init__(self, etos):
+    def __init__(self, etos, test_suite_started):
         """ESR test result handler."""
         self.etos = etos
+        self.test_suite_started = test_suite_started.json
+        test_suite_name = self.test_suite_started["meta"]["id"]
+        self.logger = logging.getLogger(f"ESR - ResultHandler({test_suite_name})")
         self.events = {}
 
     @property
     def has_started(self):
         """Whether or not test suites have started."""
-        expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-        return len(self.events.get("subSuiteStarted", [])) == expected_number_of_suites
+        return (
+            len(self.events.get("subSuiteStarted", []))
+            == self.expected_number_of_suites
+        )
 
     @property
     def has_finished(self):
@@ -54,8 +58,7 @@ class ResultHandler:
         if not self.events.get("subSuiteFinished"):
             return False
         nbr_of_finished = len(self.events.get("subSuiteFinished"))
-        expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-        return nbr_of_finished == expected_number_of_suites
+        return nbr_of_finished == self.expected_number_of_suites
 
     @property
     def test_suites_finished(self):
@@ -73,7 +76,7 @@ class ResultHandler:
         conclusion = "SUCCESSFUL"
         description = ""
 
-        if self.etos.config.get("results") is None:
+        if self.results is None:
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"
             description = "Did not receive test results from sub suites."
@@ -95,42 +98,29 @@ class ResultHandler:
                 description = "No description received from ESR or ETR."
         return verdict, conclusion, description
 
-    def get_events(self, suite_id):
+    def get_events(self):
         """Get events from an activity started from suite id.
 
-        :param suite_id: ID of test execution recipe that triggered this activity.
-        :type suite_id: str
         :return: Dictionary of all events generated for this suite.
         :rtype: dict
         """
         self.logger.info("Requesting events from GraphQL")
-        if self.activity_id is None:
-            self.logger.info("Getting activity ID.")
-            activity = request_activity(self.etos, suite_id)
-            if activity is None:
-                self.logger.warning("Activity ID not found yet.")
-                return
-            self.logger.info("Activity id: %r", activity["meta"]["id"])
-            self.activity_id = activity["meta"]["id"]
-
-        expected_number_of_suites = self.etos.config.get("nbr_of_suites")
-        self.logger.info("Expected number of suites: %r", expected_number_of_suites)
+        self.logger.info(
+            "Expected number of suites: %r", self.expected_number_of_suites
+        )
 
         events = {
             "subSuiteStarted": [],
             "subSuiteFinished": [],
         }
-        main_suite = self.etos.config.get("test_suite_started")
-        self.logger.info("Main suite: %r", main_suite["meta"]["id"])
-        if len(self.events.get("subSuiteStarted", [])) != expected_number_of_suites:
+        main_suite_id = self.test_suite_started["meta"]["id"]
+        self.logger.info("Main suite: %r", main_suite_id)
+        if (
+            len(self.events.get("subSuiteStarted", []))
+            != self.expected_number_of_suites
+        ):
             self.logger.info("Getting subSuiteStarted")
-            started = [
-                test_suite_started
-                for test_suite_started in request_test_suite_started(
-                    self.etos, self.activity_id
-                )
-                if test_suite_started["meta"]["id"] != main_suite["meta"]["id"]
-            ]
+            started = list(request_test_suite_started(self.etos, main_suite_id))
             if not started:
                 self.logger.info("No subSuitesStarted yet.")
                 self.events = events
@@ -143,7 +133,10 @@ class ResultHandler:
         started_ids = [
             test_suite_started["meta"]["id"] for test_suite_started in started
         ]
-        if len(self.events.get("subSuiteFinished", [])) != expected_number_of_suites:
+        if (
+            len(self.events.get("subSuiteFinished", []))
+            != self.expected_number_of_suites
+        ):
             self.logger.info("Getting subSuiteFinished")
             finished = list(request_test_suite_finished(self.etos, started_ids))
             if not finished:
@@ -155,20 +148,23 @@ class ResultHandler:
         events["subSuiteFinished"] = self.events.get("subSuiteFinished", [])
         self.events = events
 
-    def wait_for_test_suite_finished(self):
-        """Wait for test suites to finish."""
-        tercc = self.etos.config.get("tercc")
+    def wait_for_test_suite_finished(self, expected):
+        """Wait for test suites to finish.
+
+        :param expected: Expected number of test suites.
+        :type expected: int
+        """
+        self.expected_number_of_suites = expected
 
         timeout = time.time() + self.etos.debug.default_test_result_timeout
         print_once = False
         with DuplicateFilter(self.logger):
             while time.time() < timeout:
                 time.sleep(10)
-                self.get_events(tercc.meta.event_id)
-                expected_number_of_suites = self.etos.config.get("nbr_of_suites")
+                self.get_events()
                 self.logger.info(
                     "Expected number of test suites: %r, currently active: %r",
-                    expected_number_of_suites,
+                    self.expected_number_of_suites,
                     len(self.events.get("subSuiteStarted", [])),
                 )
                 if not self.has_started:
@@ -178,7 +174,7 @@ class ResultHandler:
                     self.logger.info("Test suites have started.")
                 if self.has_finished:
                     self.logger.info("Test suites have finished.")
-                    self.etos.config.set("results", self.events)
+                    self.results = self.events
                     return True
 
                 self.logger.info("Waiting for test suites to finish.")

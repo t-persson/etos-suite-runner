@@ -1,4 +1,4 @@
-# Copyright 2020 Axis Communications AB.
+# Copyright 2020-2022 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -17,6 +17,7 @@
 import os
 import json
 import logging
+from threading import Lock
 
 from packageurl import PackageURL
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
@@ -44,11 +45,20 @@ class ESRParameters:
     """Parameters required for ESR."""
 
     logger = logging.getLogger("ESRParameters")
+    lock = Lock()
+    __test_suite = None
 
     def __init__(self, etos):
         """ESR parameters instance."""
         self.etos = etos
         self.issuer = {"name": "ETOS Suite Runner"}
+        self.environment_status = {"status": "NOT_STARTED", "error": None}
+
+    def set_status(self, status, error):
+        """Set environment provider status."""
+        with self.lock:
+            self.environment_status["status"] = status
+            self.environment_status["error"] = error
 
     def get_node(self, response):
         """Get a single node from a GraphQL response.
@@ -105,6 +115,28 @@ class ESRParameters:
             tercc.rebuild(json.loads(os.getenv("TERCC")))
             self.etos.config.set("tercc", tercc)
         return self.etos.config.get("tercc")
+
+    @property
+    def test_suite(self):
+        """Download and return test batches.
+
+        :return: Batches.
+        :rtype: list
+        """
+        with self.lock:
+            if self.__test_suite is None:
+                tercc = self.tercc.json
+                batch_uri = tercc.get("data", {}).get("batchesUri")
+                json_header = {"Accept": "application/json"}
+                json_response = self.etos.http.wait_for_request(
+                    batch_uri,
+                    headers=json_header,
+                )
+                response = {}
+                for response in json_response:
+                    break
+                self.__test_suite = response
+        return self.__test_suite if self.__test_suite else []
 
     @property
     def product(self):

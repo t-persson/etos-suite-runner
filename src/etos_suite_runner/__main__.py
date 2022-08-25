@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2020-2021 Axis Communications AB.
+# Copyright 2020-2022 Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -20,27 +20,21 @@ import os
 import logging
 import traceback
 import signal
+import threading
+from uuid import uuid4
 
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
 
 from etos_suite_runner.lib.runner import SuiteRunner
 from etos_suite_runner.lib.esr_parameters import ESRParameters
+from etos_suite_runner.lib.exceptions import EnvironmentProviderException
 
 # Remove spam from pika.
 logging.getLogger("pika").setLevel(logging.WARNING)
 
 LOGGER = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.relpath(__file__))
-
-
-class EnvironmentProviderException(Exception):
-    """Exception from EnvironmentProvider."""
-
-    def __init__(self, msg, task_id):
-        """Initialize with task_id."""
-        self.task_id = task_id
-        super().__init__(msg)
 
 
 class ESR:  # pylint:disable=too-many-instance-attributes
@@ -67,13 +61,19 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
 
-    def _request_environment(self):
+    def _request_environment(self, ids):
         """Request an environment from the environment provider.
 
+        :param ids: Generated suite runner IDs used to correlate environments and the suite
+                    runners.
+        :type ids: list
         :return: Task ID and an error message.
         :rtype: tuple
         """
-        params = {"suite_id": self.params.tercc.meta.event_id}
+        params = {
+            "suite_id": self.params.tercc.meta.event_id,
+            "suite_runner_ids": ",".join(ids),
+        }
         wait_generator = self.etos.http.retry(
             "POST", self.etos.debug.environment_provider, json=params
         )
@@ -92,13 +92,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             return None, str(exception)
         return task_id, ""
 
-    def _wait_for_environment(self, task_id):
+    def _get_environment_status(self, task_id):
         """Wait for an environment being provided.
 
         :param task_id: Task ID to wait for.
         :type task_id: str
-        :return: Environment and an error message.
-        :rtype: tuple
         """
         timeout = self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
         wait_generator = self.etos.utils.wait(
@@ -107,30 +105,26 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             timeout=timeout,
             params={"id": task_id},
         )
-        environment = None
         result = {}
         response = None
         for generator in wait_generator:
             for response in generator:
-                result = response.get("result", {})
-                if response and result and result.get("error") is None:
-                    environment = response
+                result = (
+                    response.get("result", {})
+                    if response.get("result") is not None
+                    else {}
+                )
+                self.params.set_status(response.get("status"), result.get("error"))
+                if response and result:
                     break
-                if result and result.get("error"):
-                    return None, result.get("error")
-            if environment is not None:
+            if response and result:
                 break
         else:
-            if result and result.get("error"):
-                return None, result.get("error")
-            return (
-                None,
-                (
-                    "Unknown Error: Did not receive an environment "
-                    f"within {self.etos.debug.default_http_timeout}s"
-                ),
+            self.params.set_status(
+                "FAILURE",
+                "Unknown Error: Did not receive an environment "
+                f"within {self.etos.debug.default_http_timeout}s",
             )
-        return environment, ""
 
     def _release_environment(self, task_id):
         """Release an environment from the environment provider.
@@ -145,21 +139,23 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             if response:
                 break
 
-    def _reserve_workers(self):
-        """Reserve workers for test."""
+    def _reserve_workers(self, ids):
+        """Reserve workers for test.
+
+        :param ids: Generated suite runner IDs used to correlate environments and the suite
+                    runners.
+        :type ids: list
+        :return: The environment provider task ID
+        :rtype: str
+        """
         LOGGER.info("Request environment from environment provider")
-        task_id, msg = self._request_environment()
+        task_id, msg = self._request_environment(ids)
         if task_id is None:
             raise EnvironmentProviderException(msg, task_id)
+        return task_id
 
-        LOGGER.info("Wait for environment to become ready.")
-        environment, msg = self._wait_for_environment(task_id)
-        if environment is None:
-            raise EnvironmentProviderException(msg, task_id)
-        return environment, task_id
-
-    def run_suite(self, triggered):
-        """Trigger an activity and starts the actual test runner.
+    def run_suites(self, triggered):
+        """Start up a suite runner handling multiple suites that execute within test runners.
 
         Will only start the test activity if there's a 'slot' available.
 
@@ -173,22 +169,30 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         )
         runner = SuiteRunner(self.params, self.etos, context)
 
+        ids = []
+        for suite in self.params.test_suite:
+            suite["test_suite_started_id"] = str(uuid4())
+            ids.append(suite["test_suite_started_id"])
+
         task_id = None
         try:
             LOGGER.info("Wait for test environment.")
-            environment, task_id = self._reserve_workers()
+            task_id = self._reserve_workers(ids)
+            self.etos.config.set("task_id", task_id)
+            threading.Thread(
+                target=self._get_environment_status, args=(task_id,), daemon=True
+            ).start()
 
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
 
             LOGGER.info("Starting ESR.")
-            runner.run(environment.get("result"))
+            runner.start_suites_and_wait()
         except EnvironmentProviderException as exception:
             task_id = exception.task_id
-            raise
-        finally:
             LOGGER.info("Release test environment.")
             if task_id is not None:
                 self._release_environment(task_id)
+            raise
 
     @staticmethod
     def verify_input():
@@ -239,7 +243,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise
 
         try:
-            self.run_suite(triggered)
+            self.run_suites(triggered)
             self.etos.events.send_activity_finished(
                 triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
             )
