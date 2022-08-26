@@ -20,8 +20,23 @@ TEST_SUITE_STARTED = """
     edges {
       node {
         data {
-          testSuiteCategories {
-            type
+          name
+        }
+      }
+    }
+  }
+}
+"""
+
+
+TEST_SUITE_FINISHED = """
+{
+  testSuiteFinished(search: "{'links.target': '%s', 'links.type': 'TEST_SUITE_EXECUTION'}" last: 1) {
+    edges {
+      node {
+        data {
+          testSuiteOutcome {
+            verdict
           }
         }
         meta {
@@ -33,21 +48,6 @@ TEST_SUITE_STARTED = """
 }
 """
 
-TEST_SUITE_FINISHED = """
-{
-  testSuiteFinished(search: "%s") {
-    edges {
-      node {
-        data {
-          testSuiteOutcome {
-            verdict
-          }
-        }
-      }
-    }
-  }
-}
-"""
 
 ENVIRONMENTS = """
 {

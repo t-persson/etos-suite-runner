@@ -55,32 +55,26 @@ def request_test_suite_started(etos, main_suite_id):
     return None  # StopIteration
 
 
-def request_test_suite_finished(etos, test_suite_ids):
-    """Request test suite finished from graphql.
+def request_test_suite_finished(etos, test_suite_started_id):
+    """Request test suite started from graphql.
 
     :param etos: ETOS client instance.
     :type etos: :obj:`etos_lib.etos.Etos`
-    :param test_suite_ids: list of test suite started IDs of which finished to search for.
-    :type test_suite_ids: list
-    :return: Iterator of test suite finished graphql responses.
+    :param test_suite_started_id: ID of test suite which caused the test suites started
+    :type test_suite_started_id: str
+    :return: Iterator of test suite started graphql responses.
     :rtype: iterator
     """
-    or_query = "{'$or': ["
-    or_query += ", ".join(
-        [
-            f"{{'links.type': 'TEST_SUITE_EXECUTION', 'links.target': '{test_suite_id}'}}"
-            for test_suite_id in test_suite_ids
-        ]
-    )
-    or_query += "]}"
-    for response in request(etos, TEST_SUITE_FINISHED % or_query):
+    for response in request(etos, TEST_SUITE_FINISHED % test_suite_started_id):
         if response:
-            for _, test_suite_finished in etos.graphql.search_for_nodes(
-                response, "testSuiteFinished"
-            ):
-                yield test_suite_finished
-            return None  # StopIteration
-    return None  # StopIteration
+            try:
+                _, test_suite_finished = next(
+                    etos.graphql.search_for_nodes(response, "testSuiteFinished")
+                )
+            except StopIteration:
+                return None
+            return test_suite_finished
+    return None
 
 
 def request_environment_defined(etos, activity_id):
@@ -95,9 +89,7 @@ def request_environment_defined(etos, activity_id):
     """
     for response in request(etos, ENVIRONMENTS % activity_id):
         if response:
-            for _, environment in etos.graphql.search_for_nodes(
-                response, "environmentDefined"
-            ):
+            for _, environment in etos.graphql.search_for_nodes(response, "environmentDefined"):
                 yield environment
             return None  # StopIteration
     return None  # StopIteration

@@ -16,11 +16,15 @@
 """ESR parameters module."""
 import os
 import json
+import time
 import logging
 from threading import Lock
 
 from packageurl import PackageURL
+from etos_lib.logging.logger import FORMAT_CONFIG
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
+from .graphql import request_environment_defined
+from .exceptions import EnvironmentProviderException
 
 ARTIFACTS = """
 {
@@ -46,6 +50,8 @@ class ESRParameters:
 
     logger = logging.getLogger("ESRParameters")
     lock = Lock()
+    environment_provider_done = False
+    error = False
     __test_suite = None
 
     def __init__(self, etos):
@@ -53,6 +59,7 @@ class ESRParameters:
         self.etos = etos
         self.issuer = {"name": "ETOS Suite Runner"}
         self.environment_status = {"status": "NOT_STARTED", "error": None}
+        self.__environments = {}
 
     def set_status(self, status, error):
         """Set environment provider status."""
@@ -150,3 +157,85 @@ class ESRParameters:
             purl = PackageURL.from_string(identity)
             self.etos.config.set("product", purl.name)
         return self.etos.config.get("product")
+
+    def collect_environments(self):
+        """Get environments for all test suites in this ETOS run."""
+        FORMAT_CONFIG.identifier = self.tercc.meta.event_id
+        downloaded = []
+        status = {
+            "status": "FAILURE",
+            "error": "Couldn't collect any error information",
+        }
+        timeout = time.time() + self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
+        while time.time() < timeout:
+            status = self.environment_status
+            for environment in request_environment_defined(
+                self.etos, self.etos.config.get("context")
+            ):
+                if environment["meta"]["id"] in downloaded:
+                    continue
+                suite = self._download_sub_suite(environment)
+                if self.error:
+                    break
+                downloaded.append(environment["meta"]["id"])
+                if suite is None:  # Not a real sub suite environment defined event.
+                    continue
+                suite["id"] = environment["meta"]["id"]
+                with self.lock:
+                    self.__environments.setdefault(suite["test_suite_started_id"], [])
+                    self.__environments[suite["test_suite_started_id"]].append(suite)
+            if status["status"] == "FAILURE":
+                break
+            if status["status"] != "PENDING" and len(downloaded) >= len(self.test_suite):
+                # We must have found at least one environment for each test suite.
+                self.environment_provider_done = True
+                break
+            time.sleep(5)
+        if status["status"] == "FAILURE":
+            with self.lock:
+                self.error = EnvironmentProviderException(
+                    status["error"], self.etos.config.get("task_id")
+                )
+
+    def _download_sub_suite(self, environment):
+        """Download a sub suite from an EnvironmentDefined event.
+
+        :param environment: Environment defined event to download from.
+        :type environment: dict
+        :return: Downloaded sub suite information.
+        :rtype: dict
+        """
+        if environment["data"].get("uri") is None:
+            return None
+        uri = environment["data"]["uri"]
+        json_header = {"Accept": "application/json"}
+        json_response = self.etos.http.wait_for_request(
+            uri,
+            headers=json_header,
+        )
+        suite = {}
+        for suite in json_response:
+            break
+        else:
+            self.error = Exception("Could not download sub suite instructions")
+        return suite
+
+    def environments(self, test_suite_started_id):
+        """Iterate over all environments correlated to a test suite started.
+
+        :param test_suite_started_id: The ID to correlate environments with.
+        :type test_suite_started_id: str
+        """
+        found = 0
+        while not self.error:
+            time.sleep(1)
+            finished = self.environment_provider_done
+            with self.lock:
+                environments = self.__environments.get(test_suite_started_id, []).copy()
+            for environment in environments:
+                with self.lock:
+                    self.__environments[test_suite_started_id].remove(environment)
+                found += 1
+                yield environment
+            if finished and found > 0:
+                break

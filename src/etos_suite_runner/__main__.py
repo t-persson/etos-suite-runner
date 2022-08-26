@@ -47,9 +47,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
     def __init__(self):
         """Initialize ESR by creating a rabbitmq publisher."""
         self.logger = logging.getLogger("ESR")
-        self.etos = ETOS(
-            "ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner"
-        )
+        self.etos = ETOS("ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner")
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
         FORMAT_CONFIG.identifier = self.params.tercc.meta.event_id
@@ -109,11 +107,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         response = None
         for generator in wait_generator:
             for response in generator:
-                result = (
-                    response.get("result", {})
-                    if response.get("result") is not None
-                    else {}
-                )
+                result = response.get("result", {}) if response.get("result") is not None else {}
                 self.params.set_status(response.get("status"), result.get("error"))
                 if response and result:
                     break
@@ -163,11 +157,12 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         :type triggered: :obj:`eiffel.events.EiffelActivityTriggeredEvent`
         """
         context = triggered.meta.event_id
+        self.etos.config.set("context", context)
         LOGGER.info("Sending ESR Docker environment event.")
         self.etos.events.send_environment_defined(
             "ESR Docker", {"CONTEXT": context}, image=os.getenv("SUITE_RUNNER")
         )
-        runner = SuiteRunner(self.params, self.etos, context)
+        runner = SuiteRunner(self.params, self.etos)
 
         ids = []
         for suite in self.params.test_suite:
@@ -197,12 +192,8 @@ class ESR:  # pylint:disable=too-many-instance-attributes
     @staticmethod
     def verify_input():
         """Verify that the data input to ESR are correct."""
-        assert os.getenv(
-            "SUITE_RUNNER"
-        ), "SUITE_RUNNER enviroment variable not provided."
-        assert os.getenv(
-            "SOURCE_HOST"
-        ), "SOURCE_HOST environment variable not provided."
+        assert os.getenv("SUITE_RUNNER"), "SUITE_RUNNER enviroment variable not provided."
+        assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 
     def run(self):
@@ -249,9 +240,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             )
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
-            self.etos.events.send_activity_canceled(
-                triggered, {"CONTEXT": context}, reason=reason
-            )
+            self.etos.events.send_activity_canceled(triggered, {"CONTEXT": context}, reason=reason)
             self.etos.events.send_announcement_published(
                 "[ESR] Test suite execution failed",
                 traceback.format_exc(),
@@ -262,9 +251,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
 
     def graceful_exit(self, *_):
         """Attempt to gracefully exit the running job."""
-        self.logger.info(
-            "Kill command received - Attempting to shut down all processes."
-        )
+        self.logger.info("Kill command received - Attempting to shut down all processes.")
         raise Exception("Terminate command received - Shutting down.")
 
 
@@ -278,6 +265,7 @@ def main():
             termination_log.write(traceback.format_exc())
         raise
     finally:
+        esr.etos.publisher.wait_for_unpublished_events()
         esr.etos.publisher.stop()
     LOGGER.info("ESR Finished Executing.")
 
