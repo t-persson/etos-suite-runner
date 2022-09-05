@@ -22,6 +22,9 @@ TEST_SUITE_STARTED = """
         data {
           name
         }
+        meta {
+          id
+        }
       }
     }
   }
