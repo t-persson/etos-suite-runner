@@ -163,6 +163,7 @@ class ESRParameters:
         """Get environments for all test suites in this ETOS run."""
         FORMAT_CONFIG.identifier = self.tercc.meta.event_id
         downloaded = []
+        ignored = []
         status = {
             "status": "FAILURE",
             "error": "Couldn't collect any error information",
@@ -178,15 +179,16 @@ class ESRParameters:
             for environment in request_environment_defined(
                 self.etos, self.etos.config.get("context")
             ):
-                if environment["meta"]["id"] in downloaded:
+                if environment["meta"]["id"] in downloaded or environment["meta"]["id"] in ignored:
                     continue
                 suite = self._download_sub_suite(environment)
                 if self.error:
                     self.logger.warning("Stop collecting sub suites due to error: %r", self.error)
                     break
-                downloaded.append(environment["meta"]["id"])
                 if suite is None:  # Not a real sub suite environment defined event.
+                    ignored.append(environment["meta"]["id"])
                     continue
+                downloaded.append(environment["meta"]["id"])
                 suite["id"] = environment["meta"]["id"]
                 with self.lock:
                     self.__environments.setdefault(suite["test_suite_started_id"], [])
