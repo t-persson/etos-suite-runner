@@ -90,12 +90,15 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             return None, str(exception)
         return task_id, ""
 
-    def _get_environment_status(self, task_id):
+    def _get_environment_status(self, task_id, identifier):
         """Wait for an environment being provided.
 
         :param task_id: Task ID to wait for.
         :type task_id: str
+        :param identifier: An identifier to use for logging.
+        :type identifier: str
         """
+        FORMAT_CONFIG.identifier = identifier
         timeout = self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
         wait_generator = self.etos.utils.wait(
             self.etos.http.wait_for_request,
@@ -119,6 +122,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
                 "Unknown Error: Did not receive an environment "
                 f"within {self.etos.debug.default_http_timeout}s",
             )
+        self.logger.info("Test environment received.")
 
     def _release_environment(self, task_id):
         """Release an environment from the environment provider.
@@ -148,13 +152,15 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise EnvironmentProviderException(msg, task_id)
         return task_id
 
-    def run_suites(self, triggered):
+    def run_suites(self, triggered, tercc_id):
         """Start up a suite runner handling multiple suites that execute within test runners.
 
         Will only start the test activity if there's a 'slot' available.
 
         :param triggered: Activity triggered.
         :type triggered: :obj:`eiffel.events.EiffelActivityTriggeredEvent`
+        :param tercc_id: The ID of the tercc that is going to be executed.
+        :type tercc_id: str
         """
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
@@ -175,7 +181,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             task_id = self._reserve_workers(ids)
             self.etos.config.set("task_id", task_id)
             threading.Thread(
-                target=self._get_environment_status, args=(task_id,), daemon=True
+                target=self._get_environment_status, args=(task_id, tercc_id), daemon=True
             ).start()
 
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
@@ -234,7 +240,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise
 
         try:
-            self.run_suites(triggered)
+            self.run_suites(triggered, tercc_id)
             self.etos.events.send_activity_finished(
                 triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
             )

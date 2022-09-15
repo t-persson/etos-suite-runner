@@ -64,6 +64,7 @@ class ESRParameters:
     def set_status(self, status, error):
         """Set environment provider status."""
         with self.lock:
+            self.logger.debug("Setting environment status to %r, error %r", status, error)
             self.environment_status["status"] = status
             self.environment_status["error"] = error
 
@@ -166,9 +167,14 @@ class ESRParameters:
             "status": "FAILURE",
             "error": "Couldn't collect any error information",
         }
+        self.logger.debug(
+            "Start collecting sub suite environments (timeout=%ds).",
+            self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT"),
+        )
         timeout = time.time() + self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
         while time.time() < timeout:
-            status = self.environment_status
+            with self.lock:
+                status = self.environment_status.copy()
             for environment in request_environment_defined(
                 self.etos, self.etos.config.get("context")
             ):
@@ -176,6 +182,7 @@ class ESRParameters:
                     continue
                 suite = self._download_sub_suite(environment)
                 if self.error:
+                    self.logger.warning("Stop collecting sub suites due to error: %r", self.error)
                     break
                 downloaded.append(environment["meta"]["id"])
                 if suite is None:  # Not a real sub suite environment defined event.
@@ -185,10 +192,16 @@ class ESRParameters:
                     self.__environments.setdefault(suite["test_suite_started_id"], [])
                     self.__environments[suite["test_suite_started_id"]].append(suite)
             if status["status"] == "FAILURE":
+                self.logger.warning(
+                    "Stop collecting sub suites due to status: %r, reason %r",
+                    status["status"],
+                    status.get("error"),
+                )
                 break
             if status["status"] != "PENDING" and len(downloaded) >= len(self.test_suite):
                 # We must have found at least one environment for each test suite.
                 self.environment_provider_done = True
+                self.logger.debug("All sub suites have been collected")
                 break
             time.sleep(5)
         if status["status"] == "FAILURE":
@@ -196,6 +209,7 @@ class ESRParameters:
                 self.error = EnvironmentProviderException(
                     status["error"], self.etos.config.get("task_id")
                 )
+                self.logger.warning("Sub suite collection exited with an error: %r", self.error)
 
     def _download_sub_suite(self, environment):
         """Download a sub suite from an EnvironmentDefined event.
@@ -236,6 +250,9 @@ class ESRParameters:
                 with self.lock:
                     self.__environments[test_suite_started_id].remove(environment)
                 found += 1
+                self.logger.debug(
+                    "Sub suite environment received: %r", environment.get("test_suite_started_id")
+                )
                 yield environment
             if finished and found > 0:
                 break

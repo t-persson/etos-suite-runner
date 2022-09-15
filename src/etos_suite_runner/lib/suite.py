@@ -186,6 +186,7 @@ class TestSuite:
         threads = []
         assigner = None
         try:
+            self.logger.info("Waiting for all sub suite environments")
             for sub_suite_definition in self.sub_suite_definitions:
                 sub_suite = SubSuite(self.etos, sub_suite_definition)
                 with self.lock:
@@ -195,6 +196,7 @@ class TestSuite:
                 )
                 threads.append(thread)
                 thread.start()
+            self.logger.info("All sub suite environments received and sub suites triggered")
 
             self.logger.info("Assigning test suite started events to sub suites")
             assigner = threading.Thread(target=self._assign_test_suite_started)
