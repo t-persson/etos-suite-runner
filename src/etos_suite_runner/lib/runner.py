@@ -50,7 +50,9 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
         :type task_id: str
         """
         wait_generator = self.etos.http.wait_for_request(
-            self.etos.debug.environment_provider, params={"release": task_id}, timeout=60
+            self.etos.debug.environment_provider,
+            params={"release": task_id},
+            timeout=60,
         )
         for response in wait_generator:
             if response:

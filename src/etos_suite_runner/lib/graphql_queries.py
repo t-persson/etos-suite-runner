@@ -69,3 +69,22 @@ ENVIRONMENTS = """
   }
 }
 """
+
+
+ARTIFACTS = """
+{
+  artifactCreated(search: "{'meta.id': '%s'}") {
+    edges {
+      node {
+        __typename
+        data {
+          identity
+        }
+        meta {
+          id
+        }
+      }
+    }
+  }
+}
+"""

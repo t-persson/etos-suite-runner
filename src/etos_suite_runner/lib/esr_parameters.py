@@ -23,26 +23,8 @@ from threading import Lock
 from packageurl import PackageURL
 from etos_lib.logging.logger import FORMAT_CONFIG
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
-from .graphql import request_environment_defined
+from .graphql import request_environment_defined, request_artifact_created
 from .exceptions import EnvironmentProviderException
-
-ARTIFACTS = """
-{
-  artifactCreated(search: "{'meta.id': '%s'}") {
-    edges {
-      node {
-        __typename
-        data {
-          identity
-        }
-        meta {
-          id
-        }
-      }
-    }
-  }
-}
-"""
 
 
 class ESRParameters:
@@ -68,38 +50,6 @@ class ESRParameters:
             self.environment_status["status"] = status
             self.environment_status["error"] = error
 
-    def get_node(self, response):
-        """Get a single node from a GraphQL response.
-
-        :param response: GraphQL response dictionary.
-        :type response: dict
-        :return: Node dictionary or None.
-        :rtype: dict
-        """
-        try:
-            return next(self.etos.utils.search(response, "node"))[1]
-        except StopIteration:
-            return None
-
-    def __get_artifact_created(self):
-        """Fetch artifact created events from GraphQL.
-
-        :return: Artifact created event.
-        :rtype: :obj:`EiffelArtifactCreatedEvent`
-        """
-        wait_generator = self.etos.utils.wait(
-            self.etos.graphql.execute,
-            query=ARTIFACTS % self.etos.utils.eiffel_link(self.tercc, "CAUSE"),
-        )
-
-        for response in wait_generator:
-            created_node = self.get_node(response)
-            if not created_node:
-                continue
-            self.etos.config.set("artifact_created", created_node)
-            return created_node
-        return None
-
     @property
     def artifact_created(self):
         """Artifact under test.
@@ -108,7 +58,8 @@ class ESRParameters:
         :rtype: :obj:`EiffelArtifactCreatedEvent`
         """
         if self.etos.config.get("artifact_created") is None:
-            self.__get_artifact_created()
+            artifact_created = request_artifact_created(self.etos, self.tercc)
+            self.etos.config.set("artifact_created", artifact_created)
         return self.etos.config.get("artifact_created")
 
     @property
@@ -134,16 +85,22 @@ class ESRParameters:
         with self.lock:
             if self.__test_suite is None:
                 tercc = self.tercc.json
+                batch = tercc.get("data", {}).get("batches")
                 batch_uri = tercc.get("data", {}).get("batchesUri")
-                json_header = {"Accept": "application/json"}
-                json_response = self.etos.http.wait_for_request(
-                    batch_uri,
-                    headers=json_header,
-                )
-                response = {}
-                for response in json_response:
-                    break
-                self.__test_suite = response
+                if batch is not None and batch_uri is not None:
+                    raise Exception("Only one of 'batches' or 'batchesUri' shall be set")
+                if batch is not None:
+                    self.__test_suite = batch
+                elif batch_uri is not None:
+                    json_header = {"Accept": "application/json"}
+                    json_response = self.etos.http.wait_for_request(
+                        batch_uri,
+                        headers=json_header,
+                    )
+                    response = {}
+                    for response in json_response:
+                        break
+                    self.__test_suite = response
         return self.__test_suite if self.__test_suite else []
 
     @property
@@ -206,6 +163,10 @@ class ESRParameters:
                 self.logger.debug("All sub suites have been collected")
                 break
             time.sleep(5)
+        else:
+            raise TimeoutError(
+                f"Timed out after %d seconds {self.etos.config.get('WAIT_FOR_ENVIRONMENT_TIMEOUT')}"
+            )
         if status["status"] == "FAILURE":
             with self.lock:
                 self.error = EnvironmentProviderException(
@@ -253,7 +214,8 @@ class ESRParameters:
                     self.__environments[test_suite_started_id].remove(environment)
                 found += 1
                 self.logger.debug(
-                    "Sub suite environment received: %r", environment.get("test_suite_started_id")
+                    "Sub suite environment received: %r",
+                    environment.get("test_suite_started_id"),
                 )
                 yield environment
             if finished and found > 0:

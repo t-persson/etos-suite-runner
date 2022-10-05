@@ -18,6 +18,7 @@ from .graphql_queries import (
     TEST_SUITE_STARTED,
     TEST_SUITE_FINISHED,
     ENVIRONMENTS,
+    ARTIFACTS,
 )
 
 
@@ -33,6 +34,27 @@ def request(etos, query):
     """
     wait_generator = etos.utils.wait(etos.graphql.execute, query=query)
     yield from wait_generator
+
+
+def request_artifact_created(etos, tercc):
+    """Fetch artifact created events from GraphQL.
+
+    :param etos: ETOS client instance.
+    :type etos: :obj:`etos_lib.etos.Etos`
+    :param tercc: The TERCC to get artifact created from.
+    :type tercc: dict
+    :return: Artifact created event.
+    :rtype: :obj:`EiffelArtifactCreatedEvent`
+    """
+    for response in request(etos, ARTIFACTS % etos.utils.eiffel_link(tercc, "CAUSE")):
+        try:
+            created_node = next(etos.utils.search(response, "node"))[1]
+        except StopIteration:
+            created_node = None
+        if not created_node:
+            continue
+        return created_node
+    return None
 
 
 def request_test_suite_started(etos, main_suite_id):
