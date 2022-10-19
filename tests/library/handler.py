@@ -131,18 +131,19 @@ class Handler(BaseHTTPRequestHandler):
                 return {"data": {"environmentDefined": {"edges": self.environments}}}
             for index, suite in enumerate(self.main_suites):
                 host = os.getenv("ETOS_ENVIRONMENT_PROVIDER")
-                sub_suite_name = f"{suite.data.data.get('name')}_SubSuite_1"
-                self.environments.append(
-                    {
-                        "node": {
-                            "data": {
-                                "name": sub_suite_name,
-                                "uri": f"{host}/sub_suite/{index}",
-                            },
-                            "meta": {"id": str(uuid4())},
+                for subindex, _ in enumerate(self.tercc["data"]["batches"][index]["recipes"]):
+                    sub_suite_name = f"{suite.data.data.get('name')}_SubSuite_{subindex+1}"
+                    self.environments.append(
+                        {
+                            "node": {
+                                "data": {
+                                    "name": sub_suite_name,
+                                    "uri": f"{host}/sub_suite/{index}/{subindex}",
+                                },
+                                "meta": {"id": str(uuid4())},
+                            }
                         }
-                    }
-                )
+                    )
             return {"data": {"environmentDefined": {"edges": self.environments}}}
         return {"data": {"environmentDefined": {"edges": []}}}
 
@@ -154,27 +155,20 @@ class Handler(BaseHTTPRequestHandler):
         :return: A graphql response with a test suite started for a "started" sub suite.
         :rtype: dict
         """
-        meta = {}
-        for key, value in self.sub_suites_and_main_suites.items():
+        edges = []
+        for key, values in self.sub_suites_and_main_suites.items():
             if key in query:
-                meta = value
-                break
-        if not meta:
-            return {"data": {"testSuiteStarted": {"edges": []}}}
-        return {
-            "data": {
-                "testSuiteStarted": {
-                    "edges": [
+                for value in values:
+                    edges.append(
                         {
                             "node": {
-                                "data": {"name": meta["name"]},
-                                "meta": {"id": meta["id"]},
+                                "data": {"name": value["name"]},
+                                "meta": {"id": value["id"]},
                             }
                         }
-                    ]
-                }
-            }
-        }
+                    )
+                break
+        return {"data": {"testSuiteStarted": {"edges": edges}}}
 
     def test_suite_finished(self, query):
         """Create a test suite finished event based on sub suites and ESR suites.
@@ -184,27 +178,20 @@ class Handler(BaseHTTPRequestHandler):
         :return: A graphql response with a test suite finished for a "started" sub suite.
         :rtype: dict
         """
-        meta = {}
-        for key, value in self.sub_suites_and_main_suites.items():
+        edges = []
+        for key, values in self.sub_suites_and_main_suites.items():
             if key in query:
-                meta = value
-                break
-        if not meta:
-            return {"data": {"testSuiteFinished": {"edges": []}}}
-        return {
-            "data": {
-                "testSuiteFinished": {
-                    "edges": [
+                for value in values:
+                    edges.append(
                         {
                             "node": {
                                 "data": {"testSuiteOutcome": {"verdict": "PASSED"}},
-                                "meta": {"id": meta["finished"]},
+                                "meta": {"id": value["finished"]},
                             }
                         }
-                    ]
-                }
-            }
-        }
+                    )
+                break
+        return {"data": {"testSuiteFinished": {"edges": edges}}}
 
     def do_graphql(self, query):
         """Handle GraphQL queries to a fake ER.
@@ -230,20 +217,24 @@ class Handler(BaseHTTPRequestHandler):
         :return: Sub suite definitions that the ESR can act upon.
         :rtype: dict
         """
-        index = int(self.path.split("/")[-1])
+        subindex = int(self.path.split("/")[-1])
+        index = int(self.path.split("/")[-2])
         sub_suite = self.tercc["data"]["batches"][index].copy()
         for main_suite in self.main_suites:
             if main_suite.data.data.get("name") == sub_suite["name"]:
                 main_suite_id = main_suite.meta.event_id
-        if "_SubSuite_1" not in sub_suite["name"]:
-            sub_suite["name"] = f"{sub_suite['name']}_SubSuite_1"
+
+        sub_suite["name"] = f"{sub_suite['name']}_SubSuite_{subindex+1}"
         host = os.getenv("ETOS_ENVIRONMENT_PROVIDER")
         sub_suite["test_suite_started_id"] = self.suite_runner_ids[index]
-        self.sub_suites_and_main_suites[main_suite_id] = {
-            "name": sub_suite["name"],
-            "id": self.suite_runner_ids[index],
-            "finished": str(uuid4()),
-        }
+        self.sub_suites_and_main_suites.setdefault(main_suite_id, [])
+        self.sub_suites_and_main_suites[main_suite_id].append(
+            {
+                "name": sub_suite["name"],
+                "id": self.suite_runner_ids[index],
+                "finished": str(uuid4()),
+            }
+        )
         sub_suite["executor"] = {"request": {"method": "GET", "url": f"{host}/etr"}}
         return sub_suite
 

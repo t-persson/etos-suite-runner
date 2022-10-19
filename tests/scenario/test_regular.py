@@ -26,7 +26,7 @@ from etos_lib.lib.config import Config
 
 from etos_suite_runner.esr import ESR
 
-from tests.scenario.tercc import TERCC
+from tests.scenario.tercc import TERCC, TERCC_SUB_SUITES
 from tests.library.fake_server import FakeServer
 from tests.library.handler import Handler
 
@@ -42,8 +42,6 @@ class TestRegularScenario(TestCase):
         os.environ["ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT"] = "20"
         os.environ["SUITE_RUNNER"] = "registry.nordix.org/eiffel/etos-suite-runner"
         os.environ["SOURCE_HOST"] = "localhost"
-        os.environ["TERCC"] = json.dumps(TERCC)
-        self.tercc = json.loads(os.environ["TERCC"])
 
     def tearDown(self):
         """Reset all globally stored data for the next test."""
@@ -86,7 +84,7 @@ class TestRegularScenario(TestCase):
         """Test ESR using 1 suite with 1 sub suite.
 
         Approval criteria:
-            - It shall be possible to execute permutations in ESR without failures.
+            - It shall be possible to execute a full scenario in ESR without failures.
             - The ESR shall send  events in the correct order.
 
         Test steps:
@@ -95,7 +93,50 @@ class TestRegularScenario(TestCase):
             3. Verify that the ESR executes without errors.
             4. Verify that all events were sent and in the correct order.
         """
-        handler = partial(Handler, self.tercc)
+        os.environ["TERCC"] = json.dumps(TERCC)
+        tercc = json.loads(os.environ["TERCC"])
+
+        handler = partial(Handler, tercc)
+        end = time.time() + 25
+        self.logger.info("STEP: Start up a fake server.")
+        with FakeServer(handler) as server:
+            os.environ["ETOS_GRAPHQL_SERVER"] = server.host
+            os.environ["ETOS_ENVIRONMENT_PROVIDER"] = server.host
+
+            self.logger.info("STEP: Initialize and run ESR.")
+            esr = ESR()
+
+            try:
+                self.logger.info("STEP: Verify that the ESR executes without errors.")
+                esr.run()
+
+                self.logger.info("STEP: Verify that all events were sent and in the correct order.")
+                self.validate_event_name_order(Debug().events_published.copy())
+            finally:
+                # If the _get_environment_status method in ESR does not time out before the test
+                # finishes there will be loads of tracebacks in the log. Won't fail the test but
+                # the noise is immense.
+                while time.time() <= end:
+                    time.sleep(1)
+
+    def test_full_scenario_sub_suites(self):
+        """Test ESR using 1 suite with 2 sub suites.
+
+        Approval criteria:
+            - It shall be possible to execute a full scenario with sub suites in ESR without
+              failures.
+            - The ESR shall send  events in the correct order.
+
+        Test steps:
+            1. Start up a fake server.
+            2. Initialize and run ESR.
+            3. Verify that the ESR executes without errors.
+            4. Verify that all events were sent and in the correct order.
+        """
+        os.environ["TERCC"] = json.dumps(TERCC_SUB_SUITES)
+        tercc = json.loads(os.environ["TERCC"])
+
+        handler = partial(Handler, tercc)
         end = time.time() + 25
         self.logger.info("STEP: Start up a fake server.")
         with FakeServer(handler) as server:
