@@ -31,14 +31,14 @@ class SubSuite:
 
     released = False
 
-    def __init__(self, etos, environment):
+    def __init__(self, etos, environment, main_suite_id):
         """Initialize a sub suite."""
         self.etos = etos
         self.environment = environment
-        self.name = self.environment.get("name")
-        self.logger = logging.getLogger(f"SubSuite - {self.name}")
+        self.main_suite_id = main_suite_id
+        self.logger = logging.getLogger(f"SubSuite - {self.environment.get('name')}")
         self.logger.addFilter(DuplicateFilter(self.logger))
-        self.test_suite_started = {}  # This is set by a different thread.
+        self.test_suite_started = {}
         self.test_suite_finished = {}
 
     @property
@@ -49,6 +49,14 @@ class SubSuite:
     @property
     def started(self):
         """Whether or not this sub suite has started."""
+        if not bool(self.test_suite_started):
+            for test_suite_started in request_test_suite_started(self.etos, self.main_suite_id):
+                # Using name to match here is safe because we're only searching for
+                # sub suites that are connected to this test_suite_started ID and the
+                # "_SubSuite_\d" part of the name is set by ETOS and not humans.
+                if self.environment.get("name") == test_suite_started["data"]["name"]:
+                    self.test_suite_started = test_suite_started
+                    break
         return bool(self.test_suite_started)
 
     def request_finished_event(self):
@@ -86,7 +94,7 @@ class SubSuite:
         timeout = time.time() + self.etos.debug.default_test_result_timeout
         try:
             while time.time() < timeout:
-                time.sleep(1)
+                time.sleep(10)
                 if not self.started:
                     continue
                 self.logger.info("ETR started.")
@@ -188,11 +196,12 @@ class TestSuite:
 
         self.logger.info("Starting sub suites")
         threads = []
-        assigner = None
         try:
             self.logger.info("Waiting for all sub suite environments")
             for sub_suite_definition in self.sub_suite_definitions:
-                sub_suite = SubSuite(self.etos, sub_suite_definition)
+                sub_suite = SubSuite(
+                    self.etos, sub_suite_definition, self.suite["test_suite_started_id"]
+                )
                 with self.lock:
                     self.sub_suites.append(sub_suite)
                 thread = threading.Thread(
@@ -201,10 +210,6 @@ class TestSuite:
                 threads.append(thread)
                 thread.start()
             self.logger.info("All sub suite environments received and sub suites triggered")
-
-            self.logger.info("Assigning test suite started events to sub suites")
-            assigner = threading.Thread(target=self._assign_test_suite_started)
-            assigner.start()
 
             if self.params.error:
                 self.logger.error("Environment provider error: %r", self.params.error)
@@ -219,58 +224,9 @@ class TestSuite:
             self.logger.info("All %d sub suites triggered", number_of_suites)
             self.started = True
         finally:
-            if assigner is not None:
-                assigner.join()
             for thread in threads:
                 thread.join()
         self.logger.info("All %d sub suites finished", number_of_suites)
-
-    def _assign_test_suite_started(self):
-        """Assign test suite started events to all sub suites."""
-        FORMAT_CONFIG.identifier = self.params.tercc.meta.event_id
-        timeout = time.time() + self.etos.debug.default_test_result_timeout
-        self.logger.info("Assigning test suite started to sub suites")
-        # Number of TestSuiteStarted assigned to :obj:`SubSuite` instances.
-        number_of_assigned = 0
-        while time.time() < timeout:
-            time.sleep(1)
-            suites = []
-            with self.lock:
-                sub_suites = self.sub_suites.copy()
-            if len(sub_suites) == 0 and self.params.error:
-                self.logger.info("Environment provider error")
-                return
-            if len(sub_suites) == 0:
-                self.logger.info("No sub suites started just yet")
-                continue
-            for test_suite_started in request_test_suite_started(
-                self.etos, self.suite["test_suite_started_id"]
-            ):
-                self.logger.info("Found test suite started")
-                suites.append(test_suite_started)
-                for sub_suite in sub_suites:
-                    self.logger.info("SubSuite        : %s", sub_suite.name)
-                    self.logger.info("TestSuiteStarted: %s", test_suite_started["data"]["name"])
-                    if sub_suite.started:
-                        continue
-                    # Using name to match here is safe because we're only searching for
-                    # sub suites that are connected to this test_suite_started ID and the
-                    # "_SubSuite_\d" part of the name is set by ETOS and not humans.
-                    if sub_suite.name == test_suite_started["data"]["name"]:
-                        number_of_assigned += 1
-                        self.logger.info("Test suite started assigned to %r", sub_suite.name)
-                        sub_suite.test_suite_started = test_suite_started
-                    else:
-                        self.logger.info(
-                            "No assigned test suite started for %r",
-                            test_suite_started["data"]["name"],
-                        )
-            if number_of_assigned == 0:
-                self.logger.info("Found no test suite started to assign to sub suites yet")
-                continue
-            if len(suites) == len(sub_suites) and len(sub_suites) == number_of_assigned:
-                self.logger.info("All %d sub suites started", len(sub_suites))
-                break
 
     def release_all(self):
         """Release all, unreleased, sub suites."""
