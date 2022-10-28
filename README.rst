@@ -8,6 +8,7 @@ ETOS Suite Runner
 ETOS (Eiffel Test Orchestration System) Suite Runner
 
 Never fear, I is here
+Bananer
 
 
 Description
