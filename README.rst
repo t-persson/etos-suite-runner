@@ -7,7 +7,7 @@ ETOS Suite Runner
 
 ETOS (Eiffel Test Orchestration System) Suite Runner
 
-Never fear
+Never fear, I is here
 
 
 Description
