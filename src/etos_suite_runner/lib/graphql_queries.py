@@ -51,6 +51,39 @@ TEST_SUITE_FINISHED = """
 }
 """
 
+ACTIVITY_TRIGGERED = """
+{
+  activityTriggered(search: "{'links.type': 'CONTEXT', 'links.target': '%s'}", last: 1) {
+    edges {
+      node {
+        meta {
+          id
+        }
+      }
+    }
+  }
+}
+"""
+
+ACTIVITY_FINISHED = """
+{
+  activityFinished(search: "{'links.type': 'ACTIVITY_EXECUTION', 'links.target': '%s'}", last: 1) {
+    edges {
+      node {
+        data {
+          activityOutcome {
+            conclusion
+            description
+          }
+        }
+        meta {
+          id
+        }
+      }
+    }
+  }
+}
+"""
 
 ENVIRONMENTS = """
 {

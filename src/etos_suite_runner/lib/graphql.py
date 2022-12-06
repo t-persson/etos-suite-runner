@@ -17,6 +17,8 @@
 from .graphql_queries import (
     TEST_SUITE_STARTED,
     TEST_SUITE_FINISHED,
+    ACTIVITY_TRIGGERED,
+    ACTIVITY_FINISHED,
     ENVIRONMENTS,
     ARTIFACTS,
 )
@@ -96,6 +98,46 @@ def request_test_suite_finished(etos, test_suite_started_id):
             except StopIteration:
                 return None
             return test_suite_finished
+    return None
+
+
+def request_activity_triggered(etos, test_suite_started_id):
+    """Request activity defined from graphql.
+
+    :param etos: ETOS client instance.
+    :type etos: :obj:`etos_lib.etos.Etos`
+    :param test_suite_started_id: ID of test suite in which the activity is sent
+    :type test_suite_started_id: str
+    :return: Iterator of activity triggered graphql responses.
+    :rtype: iterator
+    """
+    for response in request(etos, ACTIVITY_TRIGGERED % test_suite_started_id):
+        if response:
+            try:
+                _, activity = next(etos.graphql.search_for_nodes(response, "activityTriggered"))
+            except StopIteration:
+                return None
+            return activity
+    return None
+
+
+def request_activity_finished(etos, activity_triggered_id):
+    """Request activity defined from graphql.
+
+    :param etos: ETOS client instance.
+    :type etos: :obj:`etos_lib.etos.Etos`
+    :param activity_triggered_id: ID of activity in which the activity is sent
+    :type activity_triggered_id: str
+    :return: Iterator of activity finished graphql responses.
+    :rtype: iterator
+    """
+    for response in request(etos, ACTIVITY_FINISHED % activity_triggered_id):
+        if response:
+            try:
+                _, activity = next(etos.graphql.search_for_nodes(response, "activityFinished"))
+            except StopIteration:
+                return None
+            return activity
     return None
 
 

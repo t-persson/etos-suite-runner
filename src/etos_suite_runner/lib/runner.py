@@ -15,12 +15,12 @@
 # limitations under the License.
 """ETOS suite runner executor."""
 import logging
-from threading import Thread
 from multiprocessing.pool import ThreadPool
 
 from etos_lib.logging.logger import FORMAT_CONFIG
 
 from .suite import TestSuite
+from .exceptions import EnvironmentProviderException
 
 
 class SuiteRunner:  # pylint:disable=too-few-public-methods
@@ -60,15 +60,15 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
 
     def start_suites_and_wait(self):
         """Get environments and start all test suites."""
-        Thread(target=self.params.collect_environments, daemon=True).start()
         try:
             test_suites = [
                 TestSuite(self.etos, self.params, suite) for suite in self.params.test_suite
             ]
             with ThreadPool() as pool:
                 pool.map(self.run, test_suites)
-            if self.params.error:
-                raise self.params.error
+            status = self.params.get_status()
+            if status.get("error") is not None:
+                raise EnvironmentProviderException(status["error"], self.etos.config.get("task_id"))
         finally:
             task_id = self.etos.config.get("task_id")
             self.logger.info("Release the full test environment.")

@@ -22,8 +22,15 @@ from etos_lib.logging.logger import FORMAT_CONFIG
 from eiffellib.events import EiffelTestSuiteStartedEvent
 
 from .executor import Executor
-from .graphql import request_test_suite_finished, request_test_suite_started
+from .graphql import (
+    request_test_suite_finished,
+    request_test_suite_started,
+    request_environment_defined,
+    request_activity_triggered,
+    request_activity_finished,
+)
 from .log_filter import DuplicateFilter
+from .exceptions import EnvironmentProviderException
 
 
 class SubSuite:
@@ -120,12 +127,13 @@ class SubSuite:
                 break
 
 
-class TestSuite:
+class TestSuite:  # pylint:disable=too-many-instance-attributes
     """Handle the starting and waiting for test suites in ETOS."""
 
     test_suite_started = None
     started = False
-    lock = threading.Lock()
+    __activity_triggered = None
+    __activity_finished = None
 
     def __init__(self, etos, params, suite):
         """Initialize a TestSuite instance."""
@@ -137,18 +145,96 @@ class TestSuite:
         self.sub_suites = []
 
     @property
-    def sub_suite_definitions(self):
-        """All sub suite definitions from the environment provider.
+    def sub_suite_environments(self):
+        """All sub suite environments from the environment provider.
 
-        Each sub suite definition is an environment for the sub suites to execute in.
+        Each sub suite environment is an environment for the sub suites to execute in.
         """
-        yield from self.params.environments(self.suite["test_suite_started_id"])
+        self.logger.debug(
+            "Start collecting sub suite definitions (timeout=%ds).",
+            self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT"),
+        )
+        environments = []
+        timeout = time.time() + self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
+        while time.time() < timeout:
+            time.sleep(5)
+            activity_triggered = self.__environment_activity_triggered(
+                self.suite["test_suite_started_id"]
+            )
+            if activity_triggered is None:
+                continue
+            for environment in request_environment_defined(
+                self.etos, activity_triggered["meta"]["id"]
+            ):
+                if environment["meta"]["id"] not in environments:
+                    environments.append(environment["meta"]["id"])
+                    yield environment
+            activity_finished = self.__environment_activity_finished(
+                activity_triggered["meta"]["id"]
+            )
+            if activity_finished is not None:
+                if activity_finished["data"]["activityOutcome"]["conclusion"] != "SUCCESSFUL":
+                    raise EnvironmentProviderException(
+                        activity_finished["data"]["activityOutcome"]["description"],
+                        self.etos.config.get("task_id"),
+                    )
+                return
+        else:  # pylint:disable=useless-else-on-loop
+            raise TimeoutError(
+                f"Timed out after {self.etos.config.get('WAIT_FOR_ENVIRONMENT_TIMEOUT')} seconds."
+            )
 
     @property
     def all_finished(self):
         """Whether or not all sub suites are finished."""
-        with self.lock:
-            return all(sub_suite.finished for sub_suite in self.sub_suites)
+        return all(sub_suite.finished for sub_suite in self.sub_suites)
+
+    def __environment_activity_triggered(self, test_suite_started_id):
+        """Activity triggered event from the environment provider.
+
+        :param test_suite_started_id: The ID that the activity triggered links to.
+        :type test_suite_started_id: str
+        :return: An activity triggered event dictionary.
+        :rtype: dict
+        """
+        if self.__activity_triggered is None:
+            self.__activity_triggered = request_activity_triggered(self.etos, test_suite_started_id)
+        return self.__activity_triggered
+
+    def __environment_activity_finished(self, activity_triggered_id):
+        """Activity finished event from the environment provider.
+
+        :param activity_triggered_id: The ID that the activity finished links to.
+        :type activity_triggered_id: str
+        :return: An activity finished event dictionary.
+        :rtype: dict
+        """
+        if self.__activity_finished is None:
+            self.__activity_finished = request_activity_finished(self.etos, activity_triggered_id)
+        return self.__activity_finished
+
+    def _download_sub_suite(self, environment):
+        """Download a sub suite from an EnvironmentDefined event.
+
+        :param environment: Environment defined event to download from.
+        :type environment: dict
+        :return: Downloaded sub suite information.
+        :rtype: dict
+        """
+        if environment["data"].get("uri") is None:
+            return None
+        uri = environment["data"]["uri"]
+        json_header = {"Accept": "application/json"}
+        json_response = self.etos.http.wait_for_request(
+            uri,
+            headers=json_header,
+        )
+        suite = {}
+        for suite in json_response:
+            break
+        else:
+            raise Exception("Could not download sub suite instructions")
+        return suite
 
     def _announce(self, header, body):
         """Send an announcement over Eiffel.
@@ -198,12 +284,13 @@ class TestSuite:
         threads = []
         try:
             self.logger.info("Waiting for all sub suite environments")
-            for sub_suite_definition in self.sub_suite_definitions:
+            for sub_suite_environment in self.sub_suite_environments:
+                sub_suite_definition = self._download_sub_suite(sub_suite_environment)
+                sub_suite_definition["id"] = sub_suite_environment["meta"]["id"]
                 sub_suite = SubSuite(
                     self.etos, sub_suite_definition, self.suite["test_suite_started_id"]
                 )
-                with self.lock:
-                    self.sub_suites.append(sub_suite)
+                self.sub_suites.append(sub_suite)
                 thread = threading.Thread(
                     target=sub_suite.start, args=(self.params.tercc.meta.event_id,)
                 )
@@ -211,22 +298,12 @@ class TestSuite:
                 thread.start()
             self.logger.info("All sub suite environments received and sub suites triggered")
 
-            if self.params.error:
-                self.logger.error("Environment provider error: %r", self.params.error)
-                self._announce(
-                    "Error",
-                    f"Environment provider failed to provide an environment: '{self.params.error}'"
-                    "\nWill finish already started sub suites\n",
-                )
-                return
-            with self.lock:
-                number_of_suites = len(self.sub_suites)
-            self.logger.info("All %d sub suites triggered", number_of_suites)
+            self.logger.info("All %d sub suites triggered", len(self.sub_suites))
             self.started = True
         finally:
             for thread in threads:
                 thread.join()
-        self.logger.info("All %d sub suites finished", number_of_suites)
+        self.logger.info("All %d sub suites finished", len(self.sub_suites))
 
     def release_all(self):
         """Release all, unreleased, sub suites."""
