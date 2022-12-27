@@ -163,15 +163,15 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             )
             if activity_triggered is None:
                 continue
+            activity_finished = self.__environment_activity_finished(
+                activity_triggered["meta"]["id"]
+            )
             for environment in request_environment_defined(
                 self.etos, activity_triggered["meta"]["id"]
             ):
                 if environment["meta"]["id"] not in environments:
                     environments.append(environment["meta"]["id"])
                     yield environment
-            activity_finished = self.__environment_activity_finished(
-                activity_triggered["meta"]["id"]
-            )
             if activity_finished is not None:
                 if activity_finished["data"]["activityOutcome"]["conclusion"] != "SUCCESSFUL":
                     raise EnvironmentProviderException(
