@@ -312,3 +312,24 @@ TERCC_SUB_SUITES = {
     },
     "links": [{"type": "CAUSE", "target": "349f9bf9-0fc7-4dd4-b641-ac5f1c9ea7aa"}],
 }
+
+
+TERCC_EMPTY = {
+    "data": {
+        "selectionStrategy": {"id": "6e922b03-1323-42ca-9cf8-34427ea13f2b"},
+        "batches": [
+            {
+                "name": "Suite",
+                "priority": 1,
+                "recipes": [],
+            },
+        ],
+    },
+    "meta": {
+        "type": "EiffelTestExecutionRecipeCollectionCreatedEvent",
+        "id": "6e8ec0be-3299-4242-b07c-1843113c350f",
+        "time": 1664260578384,
+        "version": "4.1.1",
+    },
+    "links": [{"type": "CAUSE", "target": "349f9bf9-0fc7-4dd4-b641-ac5f1c9ea7aa"}],
+}

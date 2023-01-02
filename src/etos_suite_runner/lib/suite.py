@@ -132,6 +132,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
 
     test_suite_started = None
     started = False
+    empty = False
     __activity_triggered = None
     __activity_finished = None
 
@@ -178,7 +179,8 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                         activity_finished["data"]["activityOutcome"]["description"],
                         self.etos.config.get("task_id"),
                     )
-                return
+                if len(environments) > 0:  # Must be at least 1 sub suite.
+                    return
         else:  # pylint:disable=useless-else-on-loop
             raise TimeoutError(
                 f"Timed out after {self.etos.config.get('WAIT_FOR_ENVIRONMENT_TIMEOUT')} seconds."
@@ -279,6 +281,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
 
         self.test_suite_started = self._send_test_suite_started()
         self.logger.info("Test suite started %r", self.test_suite_started.meta.event_id)
+        if len(self.suite.get("recipes")) == 0:
+            self.logger.error("Not recipes found in test suite. Exiting.")
+            self.empty = True
+            return
 
         self.logger.info("Starting sub suites")
         threads = []
@@ -344,7 +350,13 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         conclusion = "SUCCESSFUL"
         description = ""
 
-        if not self.started:
+        if self.empty:
+            verdict = "INCONCLUSIVE"
+            conclusion = "FAILED"
+            description = (
+                f"No tests in test suite {self.params.tercc.meta.event_id}, aborting test run"
+            )
+        elif not self.started:
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"
             description = (

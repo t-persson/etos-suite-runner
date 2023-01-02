@@ -26,7 +26,7 @@ from etos_lib.lib.config import Config
 
 from etos_suite_runner.esr import ESR
 
-from tests.scenario.tercc import TERCC, TERCC_SUB_SUITES
+from tests.scenario.tercc import TERCC, TERCC_SUB_SUITES, TERCC_EMPTY
 from tests.library.fake_server import FakeServer
 from tests.library.handler import Handler
 
@@ -152,6 +152,54 @@ class TestRegularScenario(TestCase):
 
                 self.logger.info("STEP: Verify that all events were sent and in the correct order.")
                 self.validate_event_name_order(Debug().events_published.copy())
+            finally:
+                # If the _get_environment_status method in ESR does not time out before the test
+                # finishes there will be loads of tracebacks in the log. Won't fail the test but
+                # the noise is immense.
+                while time.time() <= end:
+                    time.sleep(1)
+
+    def test_esr_without_recipes(self):
+        """Test ESR using 1 suite without any recipes.
+
+        Approval criteria:
+            - ESR shall exit early if there are no recipes to test.
+
+        Test steps:
+            1. Start up a fake server.
+            2. Initialize and run ESR.
+            3. Verify that the ESR exits.
+        """
+        os.environ["TERCC"] = json.dumps(TERCC_EMPTY)
+        tercc = json.loads(os.environ["TERCC"])
+
+        handler = partial(Handler, tercc)
+        end = time.time() + 25
+        self.logger.info("STEP: Start up a fake server.")
+        with FakeServer(handler) as server:
+            os.environ["ETOS_GRAPHQL_SERVER"] = server.host
+            os.environ["ETOS_ENVIRONMENT_PROVIDER"] = server.host
+
+            self.logger.info("STEP: Initialize and run ESR.")
+            esr = ESR()
+            try:
+                esr.run()
+                finished = None
+                for event in Debug().events_published.copy():
+                    if event.meta.type == "EiffelTestSuiteFinishedEvent":
+                        finished = event
+                        break
+                self.logger.info("STEP: Verify that the ESR exits.")
+                assert (
+                    finished is not None
+                ), "EiffelTestSuiteFinished was not sent when test suite is empty"
+                outcome = finished.json.get("data", {}).get("outcome", {})
+                assert (
+                    outcome.get("conclusion") == "FAILED"
+                ), "Conclusion was not FAILED when test suite is empty"
+                assert (
+                    outcome.get("verdict") == "INCONCLUSIVE"
+                ), "Verdict was not INCONCLUSIVE when test suite is empty"
             finally:
                 # If the _get_environment_status method in ESR does not time out before the test
                 # finishes there will be loads of tracebacks in the log. Won't fail the test but
