@@ -91,7 +91,7 @@ class ESRParameters:
                 batch = tercc.get("data", {}).get("batches")
                 batch_uri = tercc.get("data", {}).get("batchesUri")
                 if batch is not None and batch_uri is not None:
-                    raise Exception("Only one of 'batches' or 'batchesUri' shall be set")
+                    raise ValueError("Only one of 'batches' or 'batchesUri' shall be set")
                 if batch is not None:
                     self.__test_suite = batch
                 elif batch_uri is not None:
@@ -107,14 +107,35 @@ class ESRParameters:
         return self.__test_suite if self.__test_suite else []
 
     @property
+    def purl(self):
+        """Purl from artifact created event.
+
+        :return: A packageurl.
+        :rtype: :obj:`packageurl.PackageURL`
+        """
+        if self.etos.config.get("purl") is None:
+            identity = self.artifact_created["data"].get("identity")
+            self.etos.config.set("purl", PackageURL.from_string(identity))
+        return self.etos.config.get("purl")
+
+    @property
     def product(self):
-        """Product name from artifact created event.
+        """Product name from artifact created identity.
 
         :return: Product name.
         :rtype: str
         """
         if self.etos.config.get("product") is None:
-            identity = self.artifact_created["data"].get("identity")
-            purl = PackageURL.from_string(identity)
-            self.etos.config.set("product", purl.name)
+            self.etos.config.set("product", self.purl.name)
         return self.etos.config.get("product")
+
+    @property
+    def version(self):
+        """Version from artifact created identity.
+
+        :return: Version.
+        :rtype: str
+        """
+        if self.etos.config.get("version") is None:
+            self.etos.config.set("version", self.purl.version)
+        return self.etos.config.get("version")

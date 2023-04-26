@@ -235,7 +235,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         for suite in json_response:
             break
         else:
-            raise Exception("Could not download sub suite instructions")
+            raise TimeoutError("Could not download sub suite instructions")
         return suite
 
     def _announce(self, header, body):
@@ -264,6 +264,8 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         categories = ["Regression test suite"]
         if self.params.product:
             categories.append(self.params.product)
+        if self.params.version:
+            categories.append(self.params.version)
 
         # This ID has been stored in Environment so that the ETR know which test suite to link to.
         test_suite_started.meta.event_id = self.suite.get("test_suite_started_id")
