@@ -91,7 +91,7 @@ class ESRParameters:
                 batch = tercc.get("data", {}).get("batches")
                 batch_uri = tercc.get("data", {}).get("batchesUri")
                 if batch is not None and batch_uri is not None:
-                    raise Exception("Only one of 'batches' or 'batchesUri' shall be set")
+                    raise ValueError("Only one of 'batches' or 'batchesUri' shall be set")
                 if batch is not None:
                     self.__test_suite = batch
                 elif batch_uri is not None:

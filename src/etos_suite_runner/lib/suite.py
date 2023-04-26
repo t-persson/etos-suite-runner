@@ -235,7 +235,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         for suite in json_response:
             break
         else:
-            raise Exception("Could not download sub suite instructions")
+            raise TimeoutError("Could not download sub suite instructions")
         return suite
 
     def _announce(self, header, body):

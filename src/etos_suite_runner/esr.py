@@ -258,4 +258,4 @@ class ESR:  # pylint:disable=too-many-instance-attributes
     def graceful_exit(self, *_):
         """Attempt to gracefully exit the running job."""
         self.logger.info("Kill command received - Attempting to shut down all processes.")
-        raise Exception("Terminate command received - Shutting down.")
+        raise RuntimeError("Terminate command received - Shutting down.")
