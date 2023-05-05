@@ -235,7 +235,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         for suite in json_response:
             break
         else:
-            raise Exception("Could not download sub suite instructions")
+            raise TimeoutError("Could not download sub suite instructions")
         return suite
 
     def _announce(self, header, body):
@@ -272,7 +272,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             "categories": categories,
             "types": ["FUNCTIONAL"],
         }
-        links = {"CONTEXT": self.etos.config.get("context")}
+        links = {
+            "CONTEXT": self.etos.config.get("context"),
+            "TERC": self.params.tercc.meta.event_id,
+        }
         return self.etos.events.send(test_suite_started, links, data)
 
     def start(self):
