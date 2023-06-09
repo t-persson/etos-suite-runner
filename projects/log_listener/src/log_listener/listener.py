@@ -19,6 +19,7 @@ import threading
 import json
 import logging
 import pathlib
+import time
 from typing import Optional
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from .log_subscriber import LogSubscriber
@@ -28,6 +29,7 @@ class Listener(threading.Thread):
     """Listen to log messages from ETOS executions."""
 
     __tercc = None
+    __stop = False
     rabbitmq = None
     logger = logging.getLogger(__name__)
 
@@ -88,11 +90,14 @@ class Listener(threading.Thread):
         self.rabbitmq.subscribe("*", self.new_message)
         self.rabbitmq.start()
         self.rabbitmq.wait_start()
+        while self.rabbitmq.is_alive() and not self.__stop:
+            time.sleep(0.1)
+        self.rabbitmq.stop()
         self.rabbitmq.wait_close()
 
     def stop(self) -> None:
         """Stop listener thread."""
-        self.rabbitmq.stop()
+        self.__stop = True
 
     def clear(self) -> None:
         """Clear up RabbitMQ queue."""
