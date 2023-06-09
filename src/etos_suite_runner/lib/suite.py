@@ -1,4 +1,4 @@
-# Copyright 2022 Axis Communications AB.
+# Copyright Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -94,7 +94,7 @@ class SubSuite:
         :type identifier: str
         """
         FORMAT_CONFIG.identifier = identifier
-        self.logger.info("Triggering ETR.")
+        self.logger.info("Starting up the ETOS test runner", extra={"user_log": True})
         executor = Executor(self.etos)
         executor.run_tests(self.environment)
         self.logger.info("ETR triggered.")
@@ -104,17 +104,19 @@ class SubSuite:
                 time.sleep(10)
                 if not self.started:
                     continue
-                self.logger.info("ETR started.")
+                self.logger.info("ETOS test runner has started", extra={"user_log": True})
                 self.request_finished_event()
                 if self.finished:
-                    self.logger.info("ETR finished.")
+                    self.logger.info("ETOS test runner has finished", extra={"user_log": True})
                     break
         finally:
             self.release()
 
     def release(self):
         """Release this sub suite."""
-        self.logger.info("Releasing environment")
+        self.logger.info(
+            "Check in test environment %r", self.environment["id"], extra={"user_log": True}
+        )
         wait_generator = self.etos.http.wait_for_request(
             self.etos.debug.environment_provider,
             params={"single_release": self.environment["id"]},
@@ -122,7 +124,7 @@ class SubSuite:
         )
         for response in wait_generator:
             if response:
-                self.logger.info("Successfully released")
+                self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
                 self.released = True
                 break
 
@@ -292,8 +294,16 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         self.logger.info("Starting sub suites")
         threads = []
         try:
-            self.logger.info("Waiting for all sub suite environments")
+            self.logger.info(
+                "Waiting for an environment for %r (%r)",
+                self.suite.get("name"),
+                self.test_suite_started.meta.event_id,
+                extra={"user_log": True},
+            )
             for sub_suite_environment in self.sub_suite_environments:
+                self.logger.info(
+                    "Environment received. Starting up a sub suite", extra={"user_log": True}
+                )
                 sub_suite_definition = self._download_sub_suite(sub_suite_environment)
                 sub_suite_definition["id"] = sub_suite_environment["meta"]["id"]
                 sub_suite = SubSuite(
@@ -305,14 +315,29 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                 )
                 threads.append(thread)
                 thread.start()
-            self.logger.info("All sub suite environments received and sub suites triggered")
-
-            self.logger.info("All %d sub suites triggered", len(self.sub_suites))
+            self.logger.info(
+                "All sub suites for %r (%r) have now been triggered",
+                self.suite.get("name"),
+                self.test_suite_started.meta.event_id,
+                extra={"user_log": True},
+            )
+            self.logger.info(
+                "Total count of sub suites for %r (%r): %d",
+                self.suite.get("name"),
+                self.test_suite_started.meta.event_id,
+                len(self.sub_suites),
+                extra={"user_log": True},
+            )
             self.started = True
         finally:
             for thread in threads:
                 thread.join()
-        self.logger.info("All %d sub suites finished", len(self.sub_suites))
+        self.logger.info(
+            "All sub suites for %r (%r) have now finished",
+            self.suite.get("name"),
+            self.test_suite_started.meta.event_id,
+            extra={"user_log": True},
+        )
 
     def release_all(self):
         """Release all, unreleased, sub suites."""
@@ -382,4 +407,13 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                 verdict = "PASSED"
             if not description:
                 description = "No description received from ESR or ETR."
+        self.logger.info(
+            "Test suite result for %r (%r): %r,%r,%r",
+            self.suite.get("name"),
+            self.test_suite_started.meta.event_id,
+            verdict,
+            conclusion,
+            description,
+            extra={"user_log": True},
+        )
         return verdict, conclusion, description

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright 2020-2022 Axis Communications AB.
+# Copyright Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -36,7 +36,7 @@ def main():
     finally:
         esr.etos.publisher.wait_for_unpublished_events()
         esr.etos.publisher.stop()
-    LOGGER.info("ESR Finished Executing.")
+    LOGGER.info("ESR Finished Executing.", extra={"user_log": True})
 
 
 def run():

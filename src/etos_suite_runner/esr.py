@@ -1,4 +1,4 @@
-# Copyright 2020-2022 Axis Communications AB.
+# Copyright Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -120,7 +120,10 @@ class ESR:  # pylint:disable=too-many-instance-attributes
                 "Unknown Error: Did not receive an environment "
                 f"within {self.etos.debug.default_http_timeout}s",
             )
-        self.logger.info("Environment provider finished.")
+        self.logger.info(
+            "Environment provider has finished creating an environment for test.",
+            extra={"user_log": True},
+        )
 
     def _release_environment(self, task_id):
         """Release an environment from the environment provider.
@@ -144,7 +147,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         :return: The environment provider task ID
         :rtype: str
         """
-        self.logger.info("Request environment from environment provider")
+        self.logger.info("Request environment from environment provider", extra={"user_log": True})
         task_id, msg = self._request_environment(ids)
         if task_id is None:
             raise EnvironmentProviderException(msg, task_id)
@@ -172,6 +175,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         for suite in self.params.test_suite:
             suite["test_suite_started_id"] = str(uuid4())
             ids.append(suite["test_suite_started_id"])
+        self.logger.info("Number of test suites to run: %d", len(ids), extra={"user_log": True})
 
         task_id = None
         try:
@@ -207,6 +211,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         tercc_id = None
         try:
             tercc_id = self.params.tercc.meta.event_id
+            self.logger.info("ETOS suite runner is starting up", extra={"user_log": True})
             self.etos.events.send_announcement_published(
                 "[ESR] Launching.",
                 "Starting up ESR. Waiting for tests to start.",
@@ -231,6 +236,9 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             self.verify_input()
             context = triggered.meta.event_id
         except:  # noqa
+            self.logger.exception(
+                "ETOS suite runner failed to start test execution", extra={"user_log": True}
+            )
             self.etos.events.send_announcement_published(
                 "[ESR] Failed to start test execution",
                 traceback.format_exc(),
@@ -246,6 +254,9 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             )
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
+            self.logger.exception(
+                "ETOS suite runner failed to execute test suite", extra={"user_log": True}
+            )
             self.etos.events.send_activity_canceled(triggered, {"CONTEXT": context}, reason=reason)
             self.etos.events.send_announcement_published(
                 "[ESR] Test suite execution failed",

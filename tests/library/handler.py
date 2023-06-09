@@ -1,4 +1,4 @@
-# Copyright 2022 Axis Communications AB.
+# Copyright Axis Communications AB.
 #
 # For a full list of individual contributors, please see the commit history.
 #
@@ -15,13 +15,12 @@
 # limitations under the License.
 """ETOS suite runner request handler."""
 import os
-import re
 import json
 import logging
 from http.server import BaseHTTPRequestHandler
-import urllib.parse
 from uuid import uuid4
 
+from graphql import parse
 from etos_lib.lib.debug import Debug
 import requests
 
@@ -88,11 +87,19 @@ class Handler(BaseHTTPRequestHandler):
         :param request_data: Data to parse query string from.
         :type request_data: byte
         :return: The GraphQL query string.
-        :rtype: str
+        :rtype: tuple
         """
-        data_dict = urllib.parse.parse_qs(request_data)
-        data_str = data_dict[b"query"][0].decode("utf-8")
-        return data_str.splitlines()[1].lstrip(" ").rstrip()
+        data_dict = json.loads(request_data)
+        parsed = parse(data_dict["query"]).to_dict()
+        for definition in parsed.get("definitions", []):
+            for selection in definition.get("selection_set", {}).get("selections", []):
+                query_name = selection.get("name", {}).get("value")
+                for argument in selection.get("arguments", []):
+                    if argument.get("name", {}).get("value") == "search":
+                        return query_name, json.loads(
+                            argument.get("value", {}).get("value").replace("'", '"')
+                        )
+        raise TypeError("Not a valid GraphQL query")
 
     def artifact_created(self):
         """Artifact under test.
@@ -127,14 +134,14 @@ class Handler(BaseHTTPRequestHandler):
         """Create environment defined events for all expected sub suites.
 
         :param query: GraphQL query string.
-        :type query: str
+        :type query: dict
         :return: A GraphQL response for several environment defined.
         :rtype: dict
         """
         if self.suite_runner_ids and self.main_suites:
             activity = None
             for activity_id, activity_event in self.activities.items():
-                if activity_id in query:
+                if activity_id == query["links.target"]:
                     activity = activity_event
             if activity is None:
                 return {"data": {"environmentDefined": {"edges": []}}}
@@ -178,13 +185,13 @@ class Handler(BaseHTTPRequestHandler):
         """Create a test suite started for sub suites based on ESR suites.
 
         :param query: GraphQL query string.
-        :type query: str
+        :type query: dict
         :return: A graphql response with a test suite started for a "started" sub suite.
         :rtype: dict
         """
         edges = []
         for key, values in self.sub_suites_and_main_suites.items():
-            if key in query:
+            if key == query["links.target"]:
                 for value in values:
                     edges.append(
                         {
@@ -201,13 +208,13 @@ class Handler(BaseHTTPRequestHandler):
         """Create a test suite finished event based on sub suites and ESR suites.
 
         :param query: GraphQL query string.
-        :type query: str
+        :type query: dict
         :return: A graphql response with a test suite finished for a "started" sub suite.
         :rtype: dict
         """
         edges = []
         for key, values in self.sub_suites_and_main_suites.items():
-            if key in query:
+            if key == query["links.target"]:
                 for value in values:
                     edges.append(
                         {
@@ -224,11 +231,11 @@ class Handler(BaseHTTPRequestHandler):
         """Create an activity triggered event.
 
         :param query: GraphQL query string.
-        :type query: str
+        :type query: dict
         :return: A graphql response with an activity triggered for a triggered environment provider.
         :rtype: dict
         """
-        suite_id = re.findall(r"\w{8}-\w{4}-\w{4}-\w{4}-\w{12}", query)[0]
+        suite_id = query["links.target"]
         event_id = str(uuid4())
         activity = {
             "data": {
@@ -245,13 +252,13 @@ class Handler(BaseHTTPRequestHandler):
         """Create an activity finished event.
 
         :param query: GraphQL query string.
-        :type query: str
+        :type query: dict
         :return: A graphql response with an activity finished for a "finished" activity.
         :rtype: dict
         """
         if self.environments:
             for activity in self.activities:
-                if activity in query:
+                if activity == query["links.target"]:
                     return {
                         "data": {
                             "activityFinished": {
@@ -273,25 +280,27 @@ class Handler(BaseHTTPRequestHandler):
                     }
         return {"data": {"activityFinished": {"edges": []}}}
 
-    def do_graphql(self, query):  # pylint:disable=too-many-return-statements
+    def do_graphql(self, query_name, query):  # pylint:disable=too-many-return-statements
         """Handle GraphQL queries to a fake ER.
 
-        :param query: The query string from a GraphQL request.
-        :type query: str
+        :param query_name: The name of query (or eiffel event) from a GraphQL query.
+        :type query_name: str
+        :param query: The query from a GraphQL request.
+        :type query: dict
         :return: JSON data mimicking an ER.
         :rtype: dict
         """
-        if query.startswith("artifactCreated"):
+        if query_name == "artifactCreated":
             return self.artifact_created()
-        if query.startswith("activityTriggered"):
+        if query_name == "activityTriggered":
             return self.activity_triggered(query)
-        if query.startswith("activityFinished"):
+        if query_name == "activityFinished":
             return self.activity_finished(query)
-        if query.startswith("environmentDefined"):
+        if query_name == "environmentDefined":
             return self.environment_defined(query)
-        if query.startswith("testSuiteStarted"):
+        if query_name == "testSuiteStarted":
             return self.test_suite_started(query)
-        if query.startswith("testSuiteFinished"):
+        if query_name == "testSuiteFinished":
             return self.test_suite_finished(query)
         return None
 
@@ -310,7 +319,7 @@ class Handler(BaseHTTPRequestHandler):
 
         sub_suite["name"] = f"{sub_suite['name']}_SubSuite_{subindex+1}"
         host = os.getenv("ETOS_ENVIRONMENT_PROVIDER")
-        sub_suite["test_suite_started_id"] = main_suite_id  # self.suite_runner_ids[index]
+        sub_suite["test_suite_started_id"] = main_suite_id
         self.sub_suites_and_main_suites.setdefault(main_suite_id, [])
         self.sub_suites_and_main_suites[main_suite_id].append(
             {
@@ -356,11 +365,11 @@ class Handler(BaseHTTPRequestHandler):
         self.store_request(self.request)
         request_data = self.rfile.read(int(self.headers["Content-Length"]))
         try:
-            query = self.get_gql_query(request_data)
+            query_name, query = self.get_gql_query(request_data)
         except (TypeError, KeyError):
             response = self.do_environment_provider_post(request_data)
         else:
-            response = self.do_graphql(query)
+            response = self.do_graphql(query_name, query)
 
         self.send_response(requests.codes["ok"])
         self.send_header("Content-Type", "application/json; charset=utf-8")
