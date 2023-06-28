@@ -17,4 +17,4 @@
 #
 PyScaffold==3.2.3
 packageurl-python==0.9.1
-etos_lib==3.2.1
+etos_lib==3.2.2
