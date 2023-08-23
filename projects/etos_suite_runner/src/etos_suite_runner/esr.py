@@ -120,10 +120,16 @@ class ESR:  # pylint:disable=too-many-instance-attributes
                 "Unknown Error: Did not receive an environment "
                 f"within {self.etos.debug.default_http_timeout}s",
             )
-        self.logger.info(
-            "Environment provider has finished creating an environment for test.",
-            extra={"user_log": True},
-        )
+        if self.params.get_status().get("error") is not None:
+            self.logger.error(
+                "Environment provider has failed in creating an environment for test.",
+                extra={"user_log": True},
+            )
+        else:
+            self.logger.info(
+                "Environment provider has finished creating an environment for test.",
+                extra={"user_log": True},
+            )
 
     def _release_environment(self, task_id):
         """Release an environment from the environment provider.
