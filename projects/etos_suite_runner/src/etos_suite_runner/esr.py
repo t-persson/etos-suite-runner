@@ -15,19 +15,23 @@
 # limitations under the License.
 # -*- coding: utf-8 -*-
 """ETOS suite runner module."""
-import os
 import logging
-import traceback
+import os
 import signal
 import threading
+import time
+import traceback
+from json import JSONDecodeError
 from uuid import uuid4
 
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError
 
-from etos_suite_runner.lib.runner import SuiteRunner
 from etos_suite_runner.lib.esr_parameters import ESRParameters
 from etos_suite_runner.lib.exceptions import EnvironmentProviderException
+from etos_suite_runner.lib.runner import SuiteRunner
 
 # Remove spam from pika.
 logging.getLogger("pika").setLevel(logging.WARNING)
@@ -70,22 +74,26 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             "suite_id": self.params.tercc.meta.event_id,
             "suite_runner_ids": ",".join(ids),
         }
-        wait_generator = self.etos.http.retry(
-            "POST", self.etos.debug.environment_provider, json=params
-        )
-        task_id = None
-        result = {}
         try:
-            for response in wait_generator:
-                result = response.get("result", "")
-                if response and result and result.lower() == "success":
-                    task_id = response.get("data", {}).get("id")
-                    break
-                continue
-            else:
-                return None, "Did not retrieve an environment"
-        except ConnectionError as exception:
+            response = self.etos.http.post(self.etos.debug.environment_provider, json=params)
+            response.raise_for_status()
+        except (RequestsConnectionError, HTTPError) as exception:
             return None, str(exception)
+
+        try:
+            json_response = response.json()
+        except JSONDecodeError:
+            return None, "Could not parse JSON from the environment provider"
+
+        result = json_response.get("result", "")
+        if result.lower() != "success":
+            return (
+                None,
+                "Could not retrieve an environment from the environment provider",
+            )
+        task_id = json_response.get("data", {}).get("id")
+        if task_id is None:
+            return None, "Did not retrieve an environment"
         return task_id, ""
 
     def _get_environment_status(self, task_id, identifier):
@@ -98,27 +106,26 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         """
         FORMAT_CONFIG.identifier = identifier
         timeout = self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
-        wait_generator = self.etos.utils.wait(
-            self.etos.http.wait_for_request,
-            uri=self.etos.debug.environment_provider,
-            timeout=timeout,
-            params={"id": task_id},
-        )
-        result = {}
-        response = None
-        for generator in wait_generator:
-            for response in generator:
-                result = response.get("result", {}) if response.get("result") is not None else {}
-                self.params.set_status(response.get("status"), result.get("error"))
-                if response and result:
-                    break
-            if response and result:
+        end = time.time() + timeout
+        while time.time() < end:
+            response = self.etos.http.get(
+                url=self.etos.debug.environment_provider,
+                timeout=timeout,
+                params={"id": task_id},
+            )
+            response.raise_for_status()
+            json_response = response.json()
+            # dict.get() does not work here as it only sets None if the key does not exist
+            # and sometimes the key exists, but the value is None.
+            result = json_response.get("result") or {}
+            self.params.set_status(json_response.get("status"), result.get("error"))
+            if json_response and result:
                 break
+            time.sleep(5)
         else:
             self.params.set_status(
                 "FAILURE",
-                "Unknown Error: Did not receive an environment "
-                f"within {self.etos.debug.default_http_timeout}s",
+                "Unknown Error: Did not receive an environment " f"within {timeout}s",
             )
         if self.params.get_status().get("error") is not None:
             self.logger.error(
@@ -137,12 +144,10 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         :param task_id: Task ID to release.
         :type task_id: str
         """
-        wait_generator = self.etos.http.wait_for_request(
+        response = self.etos.http.get(
             self.etos.debug.environment_provider, params={"release": task_id}
         )
-        for response in wait_generator:
-            if response:
-                break
+        response.raise_for_status()
 
     def _reserve_workers(self, ids):
         """Reserve workers for test.
@@ -243,7 +248,8 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             context = triggered.meta.event_id
         except:  # noqa
             self.logger.exception(
-                "ETOS suite runner failed to start test execution", extra={"user_log": True}
+                "ETOS suite runner failed to start test execution",
+                extra={"user_log": True},
             )
             self.etos.events.send_announcement_published(
                 "[ESR] Failed to start test execution",
@@ -261,7 +267,8 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
             self.logger.exception(
-                "ETOS suite runner failed to execute test suite", extra={"user_log": True}
+                "ETOS suite runner failed to execute test suite",
+                extra={"user_log": True},
             )
             self.etos.events.send_activity_canceled(triggered, {"CONTEXT": context}, reason=reason)
             self.etos.events.send_announcement_published(

@@ -18,19 +18,20 @@ import logging
 import threading
 import time
 
-from etos_lib.logging.logger import FORMAT_CONFIG
 from eiffellib.events import EiffelTestSuiteStartedEvent
+from etos_lib.logging.logger import FORMAT_CONFIG
+from requests.exceptions import HTTPError
 
+from .exceptions import EnvironmentProviderException
 from .executor import Executor
 from .graphql import (
+    request_activity_finished,
+    request_activity_triggered,
+    request_environment_defined,
     request_test_suite_finished,
     request_test_suite_started,
-    request_environment_defined,
-    request_activity_triggered,
-    request_activity_finished,
 )
 from .log_filter import DuplicateFilter
-from .exceptions import EnvironmentProviderException
 
 
 class SubSuite:
@@ -117,16 +118,20 @@ class SubSuite:
         self.logger.info(
             "Check in test environment %r", self.environment["id"], extra={"user_log": True}
         )
-        wait_generator = self.etos.http.wait_for_request(
+        response = self.etos.http.get(
             self.etos.debug.environment_provider,
             params={"single_release": self.environment["id"]},
             timeout=60,
         )
-        for response in wait_generator:
-            if response:
-                self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
-                self.released = True
-                break
+        try:
+            response.raise_for_status()
+        except HTTPError:
+            self.logger.exception(
+                "Failed to check in %r", self.environment["id"], extra={"user_log": True}
+            )
+            raise
+        self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
+        self.released = True
 
 
 class TestSuite:  # pylint:disable=too-many-instance-attributes
@@ -229,16 +234,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             return None
         uri = environment["data"]["uri"]
         json_header = {"Accept": "application/json"}
-        json_response = self.etos.http.wait_for_request(
-            uri,
-            headers=json_header,
-        )
-        suite = {}
-        for suite in json_response:
-            break
-        else:
-            raise TimeoutError("Could not download sub suite instructions")
-        return suite
+
+        response = self.etos.http.get(uri, headers=json_header)
+        response.raise_for_status()
+        return response.json()
 
     def _announce(self, header, body):
         """Send an announcement over Eiffel.

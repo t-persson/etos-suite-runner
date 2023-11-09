@@ -19,8 +19,8 @@ from multiprocessing.pool import ThreadPool
 
 from etos_lib.logging.logger import FORMAT_CONFIG
 
-from .suite import TestSuite
 from .exceptions import EnvironmentProviderException
+from .suite import TestSuite
 
 
 class SuiteRunner:  # pylint:disable=too-few-public-methods
@@ -49,14 +49,10 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
         :param task_id: Task ID to release.
         :type task_id: str
         """
-        wait_generator = self.etos.http.wait_for_request(
-            self.etos.debug.environment_provider,
-            params={"release": task_id},
-            timeout=60,
+        response = self.etos.http.get(
+            self.etos.debug.environment_provider, params={"release": task_id}, timeout=60
         )
-        for response in wait_generator:
-            if response:
-                break
+        response.raise_for_status()
 
     def start_suites_and_wait(self):
         """Get environments and start all test suites."""

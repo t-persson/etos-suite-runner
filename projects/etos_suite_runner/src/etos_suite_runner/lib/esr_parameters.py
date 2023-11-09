@@ -14,13 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ESR parameters module."""
-import os
 import json
 import logging
+import os
 from threading import Lock
 
-from packageurl import PackageURL
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
+from packageurl import PackageURL
+
 from .graphql import request_artifact_created
 
 
@@ -96,14 +97,12 @@ class ESRParameters:
                     self.__test_suite = batch
                 elif batch_uri is not None:
                     json_header = {"Accept": "application/json"}
-                    json_response = self.etos.http.wait_for_request(
+                    response = self.etos.http.get(
                         batch_uri,
                         headers=json_header,
                     )
-                    response = {}
-                    for response in json_response:
-                        break
-                    self.__test_suite = response
+                    response.raise_for_status()
+                    self.__test_suite = response.json()
         return self.__test_suite if self.__test_suite else []
 
     @property
