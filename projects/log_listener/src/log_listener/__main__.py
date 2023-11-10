@@ -15,27 +15,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ETOS suite runner log listener and webserver."""
-import pathlib
-import sys
 import logging
+import pathlib
 import signal
+import sys
 import threading
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from .listener import Listener
-
 
 LOGGER = logging.getLogger(__name__)
 logging.getLogger("pika").setLevel(logging.WARNING)
 
-
 APP = FastAPI()
 LOCK = threading.Lock()
+
+# TODO: Temporarily using two files for this. Should be changed to only be EVENT_FILE in the future
+# when the old endpoint is being removed.
 LOG_FILE = pathlib.Path("./log")
 LOG_FILE.touch()
+EVENT_FILE = pathlib.Path("./events")
+EVENT_FILE.touch()
 
 
 @APP.get("/log")
@@ -45,9 +48,25 @@ async def logs():
         return FileResponse(LOG_FILE)
 
 
+@APP.get("/v1/log", response_class=PlainTextResponse)
+async def v1logs(start: int, end: int = -1):
+    """Endpoint serving events from ETOS."""
+    with LOCK:
+        text = EVENT_FILE.read_text()
+    start = start - 1
+    if end == -1:  # not set
+        log_lines = text.splitlines()[start:]
+    else:
+        log_lines = text.splitlines()[start:end]
+    messages = ""
+    for message in log_lines:
+        messages += f"{message}\n"
+    return messages
+
+
 def main():
     """Entry point allowing external calls."""
-    listener = Listener(LOCK, LOG_FILE)
+    listener = Listener(LOCK, LOG_FILE, EVENT_FILE)
 
     @APP.on_event("shutdown")
     def stop(*_):

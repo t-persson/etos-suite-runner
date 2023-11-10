@@ -14,14 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Log listener module."""
-import os
-import threading
 import json
 import logging
+import os
 import pathlib
+import threading
 import time
 from typing import Optional
+
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
+
 from .log_subscriber import LogSubscriber
 
 
@@ -33,12 +35,18 @@ class Listener(threading.Thread):
     rabbitmq = None
     logger = logging.getLogger(__name__)
 
-    def __init__(self, lock: threading.Lock, log_file: pathlib.Path):
+    def __init__(self, lock: threading.Lock, log_file: pathlib.Path, event_file: pathlib.Path):
         """Initialize ETOS library."""
         super().__init__()
         self.identifier = self.tercc.meta.event_id
         self.lock = lock
+        # TODO: Temporarily using two files, one for logs and one for events.
+        # the log file shall be removed when the old endpoint is being removed.
         self.log_file = log_file
+        self.event_file = event_file
+        with self.lock:
+            with self.event_file.open() as event_file:
+                self.id = len(event_file.readlines()) + 1
 
     @property
     def tercc(self) -> EiffelTestExecutionRecipeCollectionCreatedEvent:
@@ -49,12 +57,24 @@ class Listener(threading.Thread):
             self.__tercc = tercc
         return self.__tercc
 
-    def new_message(self, message: dict, _: Optional[str] = None) -> None:
-        """Handle new log messages from ETOS."""
-        self.logger.info(message)
+    def new_event(self, event: dict, _: Optional[str] = None) -> None:
+        """Get a new event from the internal RabbitMQ bus and write it to file."""
+        if event.get("event") is None:
+            event = {"event": "message", "data": event}
+        self.__write(**event)
+
+    def __write(self, event: str, data: str) -> None:
+        """Write an event, and its data, to a file."""
         with self.lock:
-            with self.log_file.open("a") as log_file:
-                log_file.write(f"{json.dumps(message)}\n")
+            data = {"id": self.id, "event": event, "data": data}
+            with self.event_file.open("a") as events:
+                events.write(f"{json.dumps(data)}\n")
+            # TODO: Temporarily writing to two files, this next one shall be removed when the
+            # old log endpoint is removed.
+            if event.lower() == "message":
+                with self.log_file.open("a") as log_file:
+                    log_file.write(f"{data['data']}\n")
+            self.id += 1
 
     def __queue_params(self) -> Optional[dict]:
         """Get queue parameters from environment."""
@@ -80,14 +100,14 @@ class Listener(threading.Thread):
             "vhost": os.getenv("ETOS_RABBITMQ_VHOST", None),
             "queue": self.__queue_name(),
             "queue_params": self.__queue_params(),
-            "routing_key": f"{self.identifier}.log.#",
+            "routing_key": f"{self.identifier}.#.#",
             "ssl": ssl,
         }
 
     def run(self) -> None:
         """Run listener thread."""
         self.rabbitmq = LogSubscriber(**self.__rabbitmq_parameters())
-        self.rabbitmq.subscribe("*", self.new_message)
+        self.rabbitmq.subscribe("*", self.new_event)
         self.rabbitmq.start()
         self.rabbitmq.wait_start()
         while self.rabbitmq.is_alive() and not self.__stop:

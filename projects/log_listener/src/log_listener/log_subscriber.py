@@ -16,6 +16,7 @@
 """Log subscriber module."""
 import json
 from typing import Tuple
+
 from eiffellib.subscribers import RabbitMQSubscriber
 
 
