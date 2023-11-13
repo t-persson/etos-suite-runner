@@ -27,6 +27,9 @@ from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from .log_subscriber import LogSubscriber
 
 
+# TODO: Temporarily using two files, one for logs and one for events.
+# the log file shall be removed when the old endpoint is being removed.
+# pylint:disable=too-many-instance-attributes
 class Listener(threading.Thread):
     """Listen to log messages from ETOS executions."""
 
@@ -40,13 +43,11 @@ class Listener(threading.Thread):
         super().__init__()
         self.identifier = self.tercc.meta.event_id
         self.lock = lock
-        # TODO: Temporarily using two files, one for logs and one for events.
-        # the log file shall be removed when the old endpoint is being removed.
         self.log_file = log_file
         self.event_file = event_file
         with self.lock:
-            with self.event_file.open() as event_file:
-                self.id = len(event_file.readlines()) + 1
+            with self.event_file.open() as _event_file:
+                self.id = len(_event_file.readlines()) + 1
 
     @property
     def tercc(self) -> EiffelTestExecutionRecipeCollectionCreatedEvent:

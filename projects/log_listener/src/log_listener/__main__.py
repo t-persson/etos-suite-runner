@@ -52,16 +52,13 @@ async def logs():
 async def v1logs(start: int, end: int = -1):
     """Endpoint serving events from ETOS."""
     with LOCK:
-        text = EVENT_FILE.read_text()
+        text = EVENT_FILE.read_text(encoding="UTF-8")
     start = start - 1
     if end == -1:  # not set
         log_lines = text.splitlines()[start:]
     else:
         log_lines = text.splitlines()[start:end]
-    messages = ""
-    for message in log_lines:
-        messages += f"{message}\n"
-    return messages
+    return "\n".join(log_lines)
 
 
 def main():
