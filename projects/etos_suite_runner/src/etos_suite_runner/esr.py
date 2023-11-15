@@ -24,14 +24,14 @@ import traceback
 from json import JSONDecodeError
 from uuid import uuid4
 
+from eiffellib.events import EiffelActivityTriggeredEvent
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import HTTPError
-
 from etos_suite_runner.lib.esr_parameters import ESRParameters
 from etos_suite_runner.lib.exceptions import EnvironmentProviderException
 from etos_suite_runner.lib.runner import SuiteRunner
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError
 
 # Remove spam from pika.
 logging.getLogger("pika").setLevel(logging.WARNING)
@@ -46,7 +46,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
 
     logger = logging.getLogger(__name__)
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize ESR by creating a rabbitmq publisher."""
         self.logger = logging.getLogger("ESR")
         self.etos = ETOS("ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner")
@@ -61,14 +61,12 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
 
-    def _request_environment(self, ids):
+    def _request_environment(self, ids: list[str]) -> tuple(str, str):
         """Request an environment from the environment provider.
 
         :param ids: Generated suite runner IDs used to correlate environments and the suite
                     runners.
-        :type ids: list
         :return: Task ID and an error message.
-        :rtype: tuple
         """
         params = {
             "suite_id": self.params.tercc.meta.event_id,
@@ -96,13 +94,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             return None, "Did not retrieve an environment"
         return task_id, ""
 
-    def _get_environment_status(self, task_id, identifier):
+    def _get_environment_status(self, task_id: str, identifier: str) -> None:
         """Wait for an environment being provided.
 
         :param task_id: Task ID to wait for.
-        :type task_id: str
         :param identifier: An identifier to use for logging.
-        :type identifier: str
         """
         FORMAT_CONFIG.identifier = identifier
         timeout = self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
@@ -138,25 +134,22 @@ class ESR:  # pylint:disable=too-many-instance-attributes
                 extra={"user_log": True},
             )
 
-    def _release_environment(self, task_id):
+    def _release_environment(self, task_id: str) -> None:
         """Release an environment from the environment provider.
 
         :param task_id: Task ID to release.
-        :type task_id: str
         """
         response = self.etos.http.get(
             self.etos.debug.environment_provider, params={"release": task_id}
         )
         response.raise_for_status()
 
-    def _reserve_workers(self, ids):
+    def _reserve_workers(self, ids: list[str]) -> str:
         """Reserve workers for test.
 
         :param ids: Generated suite runner IDs used to correlate environments and the suite
                     runners.
-        :type ids: list
         :return: The environment provider task ID
-        :rtype: str
         """
         self.logger.info("Request environment from environment provider", extra={"user_log": True})
         task_id, msg = self._request_environment(ids)
@@ -164,15 +157,13 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise EnvironmentProviderException(msg, task_id)
         return task_id
 
-    def run_suites(self, triggered, tercc_id):
+    def run_suites(self, triggered: EiffelActivityTriggeredEvent, tercc_id: str) -> None:
         """Start up a suite runner handling multiple suites that execute within test runners.
 
         Will only start the test activity if there's a 'slot' available.
 
         :param triggered: Activity triggered.
-        :type triggered: :obj:`eiffel.events.EiffelActivityTriggeredEvent`
         :param tercc_id: The ID of the tercc that is going to be executed.
-        :type tercc_id: str
         """
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
@@ -211,13 +202,13 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise
 
     @staticmethod
-    def verify_input():
+    def verify_input() -> None:
         """Verify that the data input to ESR are correct."""
         assert os.getenv("SUITE_RUNNER"), "SUITE_RUNNER enviroment variable not provided."
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 
-    def run(self):
+    def run(self) -> None:
         """Run the ESR main loop."""
         tercc_id = None
         try:
@@ -279,7 +270,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             )
             raise
 
-    def graceful_exit(self, *_):
+    def graceful_exit(self, *_) -> None:
         """Attempt to gracefully exit the running job."""
         self.logger.info("Kill command received - Attempting to shut down all processes.")
         raise RuntimeError("Terminate command received - Shutting down.")
