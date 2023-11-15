@@ -33,8 +33,8 @@ logging.getLogger("pika").setLevel(logging.WARNING)
 APP = FastAPI()
 LOCK = threading.Lock()
 
-# TODO: Temporarily using two files for this. Should be changed to only be EVENT_FILE in the future
-# when the old endpoint is being removed.
+# TODO: Temporarily using two files for this. LOG_FILE shall be removed when the /log endpoint is
+# removed.
 LOG_FILE = pathlib.Path("./log")
 LOG_FILE.touch()
 EVENT_FILE = pathlib.Path("./events")
@@ -42,31 +42,39 @@ EVENT_FILE.touch()
 
 
 @APP.get("/log")
-async def logs():
+async def logs() -> FileResponse:
     """Endpoint serving a log file."""
     with LOCK:
         return FileResponse(LOG_FILE)
 
 
 @APP.get("/v1/log", response_class=PlainTextResponse)
-async def v1logs(start: int, end: int = -1):
-    """Endpoint serving events from ETOS."""
+async def v1logs(start: int, end: int = -1) -> str:
+    """Endpoint serving events from ETOS.
+
+    :param start: Event ID to start from when reading event file.
+    :param end: The event ID to end with when reading event file.
+    """
+    log_lines = []
     with LOCK:
-        text = EVENT_FILE.read_text(encoding="UTF-8")
-    start = start - 1
-    if end == -1:  # not set
-        log_lines = text.splitlines()[start:]
-    else:
-        log_lines = text.splitlines()[start:end]
+        with EVENT_FILE.open(encoding="utf-8") as f:
+            read = False
+            for linenbr, line in enumerate(f):
+                if linenbr + 1 == start:
+                    read = True
+                if read:
+                    log_lines.append(line.rstrip())  # Strip newline at the end
+                if end != -1 and linenbr + 1 == end:
+                    break
     return "\n".join(log_lines)
 
 
-def main():
+def main() -> None:
     """Entry point allowing external calls."""
     listener = Listener(LOCK, LOG_FILE, EVENT_FILE)
 
     @APP.on_event("shutdown")
-    def stop(*_):
+    def stop(*_) -> None:
         """Stop the listener."""
         if listener.is_alive():
             LOCK.acquire(timeout=300)  # pylint: disable=consider-using-with
@@ -90,7 +98,7 @@ def main():
         stop()
 
 
-def run():
+def run() -> None:
     """Entry point for console_scripts."""
     main()
 

@@ -28,7 +28,7 @@ from .log_subscriber import LogSubscriber
 
 
 # TODO: Temporarily using two files, one for logs and one for events.
-# the log file shall be removed when the old endpoint is being removed.
+# the log file shall be removed when the /log endpoint is being removed.
 # pylint:disable=too-many-instance-attributes
 class Listener(threading.Thread):
     """Listen to log messages from ETOS executions."""
@@ -41,7 +41,8 @@ class Listener(threading.Thread):
     def __init__(self, lock: threading.Lock, log_file: pathlib.Path, event_file: pathlib.Path):
         """Initialize ETOS library."""
         super().__init__()
-        self.identifier = self.tercc.meta.event_id
+        # self.identifier = self.tercc.meta.event_id
+        self.identifier = "kalle"
         self.lock = lock
         self.log_file = log_file
         self.event_file = event_file
@@ -70,8 +71,9 @@ class Listener(threading.Thread):
             data = {"id": self.id, "event": event, "data": data}
             with self.event_file.open("a") as events:
                 events.write(f"{json.dumps(data)}\n")
-            # TODO: Temporarily writing to two files, this next one shall be removed when the
-            # old log endpoint is removed.
+
+            # TODO: Temporarily writing to two files, self.log_file is to be removed when the /log
+            # endpoint is being removed.
             if event.lower() == "message":
                 with self.log_file.open("a") as log_file:
                     log_file.write(f"{data['data']}\n")
