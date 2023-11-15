@@ -27,11 +27,12 @@ from uuid import uuid4
 from eiffellib.events import EiffelActivityTriggeredEvent
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
-from etos_suite_runner.lib.esr_parameters import ESRParameters
-from etos_suite_runner.lib.exceptions import EnvironmentProviderException
-from etos_suite_runner.lib.runner import SuiteRunner
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from requests.exceptions import HTTPError
+
+from .lib.esr_parameters import ESRParameters
+from .lib.exceptions import EnvironmentProviderException
+from .lib.runner import SuiteRunner
 
 # Remove spam from pika.
 logging.getLogger("pika").setLevel(logging.WARNING)
@@ -61,7 +62,7 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
 
-    def _request_environment(self, ids: list[str]) -> tuple(str, str):
+    def _request_environment(self, ids: list[str]) -> tuple[str, str]:
         """Request an environment from the environment provider.
 
         :param ids: Generated suite runner IDs used to correlate environments and the suite

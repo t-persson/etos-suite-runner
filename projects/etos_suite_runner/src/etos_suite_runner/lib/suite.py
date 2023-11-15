@@ -356,7 +356,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         )
         self.logger.info("Test suite finished.")
 
-    def results(self) -> tuple(str, str, str):
+    def results(self) -> tuple[str, str, str]:
         """Test results for this execution.
 
         :return: Verdict, conclusion and description.
