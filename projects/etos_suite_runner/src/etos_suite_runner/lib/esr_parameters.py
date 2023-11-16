@@ -14,13 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ESR parameters module."""
-import os
 import json
 import logging
+import os
 from threading import Lock
 
+from eiffellib.events import (
+    EiffelArtifactCreatedEvent,
+    EiffelTestExecutionRecipeCollectionCreatedEvent,
+)
+from etos_lib import ETOS
 from packageurl import PackageURL
-from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
+
 from .graphql import request_artifact_created
 
 
@@ -31,34 +36,32 @@ class ESRParameters:
     lock = Lock()
     __test_suite = None
 
-    def __init__(self, etos):
+    def __init__(self, etos: ETOS) -> None:
         """ESR parameters instance."""
         self.etos = etos
         self.issuer = {"name": "ETOS Suite Runner"}
         self.environment_status = {"status": "NOT_STARTED", "error": None}
 
-    def set_status(self, status, error):
+    def set_status(self, status: str, error: str) -> None:
         """Set environment provider status."""
         with self.lock:
             self.logger.debug("Setting environment status to %r, error %r", status, error)
             self.environment_status["status"] = status
             self.environment_status["error"] = error
 
-    def get_status(self):
+    def get_status(self) -> dict:
         """Get environment provider status.
 
         :return: Status dictionary for the environment provider.
-        :rtype: dict
         """
         with self.lock:
             return self.environment_status.copy()
 
     @property
-    def artifact_created(self):
+    def artifact_created(self) -> EiffelArtifactCreatedEvent:
         """Artifact under test.
 
         :return: Artifact created event.
-        :rtype: :obj:`EiffelArtifactCreatedEvent`
         """
         if self.etos.config.get("artifact_created") is None:
             artifact_created = request_artifact_created(self.etos, self.tercc)
@@ -66,11 +69,10 @@ class ESRParameters:
         return self.etos.config.get("artifact_created")
 
     @property
-    def tercc(self):
+    def tercc(self) -> EiffelTestExecutionRecipeCollectionCreatedEvent:
         """Test execution recipe collection created event from environment.
 
         :return: Test execution event.
-        :rtype: :obj:`EiffelTestExecutionRecipeCollectionCreatedEvent`
         """
         if self.etos.config.get("tercc") is None:
             tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
@@ -79,12 +81,8 @@ class ESRParameters:
         return self.etos.config.get("tercc")
 
     @property
-    def test_suite(self):
-        """Download and return test batches.
-
-        :return: Batches.
-        :rtype: list
-        """
+    def test_suite(self) -> list[dict]:
+        """Download and return test batches."""
         with self.lock:
             if self.__test_suite is None:
                 tercc = self.tercc.json
@@ -96,22 +94,19 @@ class ESRParameters:
                     self.__test_suite = batch
                 elif batch_uri is not None:
                     json_header = {"Accept": "application/json"}
-                    json_response = self.etos.http.wait_for_request(
+                    response = self.etos.http.get(
                         batch_uri,
                         headers=json_header,
                     )
-                    response = {}
-                    for response in json_response:
-                        break
-                    self.__test_suite = response
+                    response.raise_for_status()
+                    self.__test_suite = response.json()
         return self.__test_suite if self.__test_suite else []
 
     @property
-    def product(self):
+    def product(self) -> str:
         """Product name from artifact created event.
 
         :return: Product name.
-        :rtype: str
         """
         if self.etos.config.get("product") is None:
             identity = self.artifact_created["data"].get("identity")

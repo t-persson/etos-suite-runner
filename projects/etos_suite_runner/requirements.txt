@@ -18,4 +18,4 @@
 PyScaffold==3.2.3
 packageurl-python==0.9.1
 cryptography~=41.0
-etos_lib==3.2.2
+etos_lib==4.0.0

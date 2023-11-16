@@ -14,9 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Executor handler module."""
-import os
 import logging
+import os
+from typing import Union
+
 from cryptography.fernet import Fernet
+from etos_lib import ETOS
 from requests.auth import HTTPBasicAuth, HTTPDigestAuth
 
 
@@ -25,22 +28,19 @@ class Executor:  # pylint:disable=too-few-public-methods
 
     logger = logging.getLogger("ESR - Executor")
 
-    def __init__(self, etos):
+    def __init__(self, etos: ETOS) -> None:
         """Initialize executor.
 
         :param etos: ETOS library instance.
-        :type etos: :obj:`etos_library.EtosLibrary`
         """
         self.etos = etos
         self.etos.config.set("build_urls", [])
 
-    def __decrypt(self, password):
+    def __decrypt(self, password: Union[str, dict]) -> str:
         """Decrypt a password using an encryption key.
 
         :param password: Password to decrypt.
-        :type password: str or dict
         :return: Decrypted password
-        :rtype: str
         """
         key = os.getenv("ETOS_ENCRYPTION_KEY")
         if key is None:
@@ -52,40 +52,32 @@ class Executor:  # pylint:disable=too-few-public-methods
             return password
         return Fernet(key).decrypt(password_value).decode()
 
-    def __auth(self, username, password, type="basic"):  # pylint:disable=redefined-builtin
+    def __auth(
+        self, username: str, password: str, type: str = "basic"  # pylint:disable=redefined-builtin
+    ) -> Union[HTTPBasicAuth, HTTPDigestAuth]:
         """Create an authentication for HTTP request.
 
         :param username: Username to authenticate.
-        :type username: str
         :param password: Password to authenticate with.
-        :type password: str
         :param type: Type of authentication. 'basic' or 'digest'.
-        :type type: str
         :return: Authentication method.
-        :rtype: :obj:`requests.auth`
         """
         password = self.__decrypt(password)
         if type.lower() == "basic":
             return HTTPBasicAuth(username, password)
         return HTTPDigestAuth(username, password)
 
-    def run_tests(self, test_suite):
+    def run_tests(self, test_suite: dict) -> None:
         """Run tests in jenkins.
 
         :param test_suite: Tests to execute.
-        :type test_suite: dict
         """
         executor = test_suite.get("executor")
         request = executor.get("request")
-        # ETOS Library, for some reason, uses the key 'verb' instead of 'method'
-        # for HTTP method.
-        request["verb"] = request.pop("method")
-        request["as_json"] = False
         if request.get("auth"):
             request["auth"] = self.__auth(**request["auth"])
-
-        wait_generator = self.etos.http.retry(**request)
-        for response in wait_generator:
-            self.logger.info("%r", response)
-            self.logger.debug("%r", response.text)
-            break
+        method = getattr(self.etos.http, request.pop("method").lower())
+        response = method(**request)
+        response.raise_for_status()
+        self.logger.info("%r", response)
+        self.logger.debug("%r", response.text)

@@ -17,20 +17,24 @@
 import logging
 import threading
 import time
+from typing import Iterator
 
-from etos_lib.logging.logger import FORMAT_CONFIG
 from eiffellib.events import EiffelTestSuiteStartedEvent
+from etos_lib import ETOS
+from etos_lib.logging.logger import FORMAT_CONFIG
+from requests.exceptions import HTTPError
 
+from .esr_parameters import ESRParameters
+from .exceptions import EnvironmentProviderException
 from .executor import Executor
 from .graphql import (
+    request_activity_finished,
+    request_activity_triggered,
+    request_environment_defined,
     request_test_suite_finished,
     request_test_suite_started,
-    request_environment_defined,
-    request_activity_triggered,
-    request_activity_finished,
 )
 from .log_filter import DuplicateFilter
-from .exceptions import EnvironmentProviderException
 
 
 class SubSuite:
@@ -38,7 +42,7 @@ class SubSuite:
 
     released = False
 
-    def __init__(self, etos, environment, main_suite_id):
+    def __init__(self, etos: ETOS, environment: dict, main_suite_id: str) -> None:
         """Initialize a sub suite."""
         self.etos = etos
         self.environment = environment
@@ -49,12 +53,12 @@ class SubSuite:
         self.test_suite_finished = {}
 
     @property
-    def finished(self):
+    def finished(self) -> bool:
         """Whether or not this sub suite has finished."""
         return bool(self.test_suite_finished)
 
     @property
-    def started(self):
+    def started(self) -> bool:
         """Whether or not this sub suite has started."""
         if not bool(self.test_suite_started):
             for test_suite_started in request_test_suite_started(self.etos, self.main_suite_id):
@@ -66,7 +70,7 @@ class SubSuite:
                     break
         return bool(self.test_suite_started)
 
-    def request_finished_event(self):
+    def request_finished_event(self) -> None:
         """Request a test suite finished event for this sub suite."""
         # Prevent ER requests if we know we're not even started.
         if not self.started:
@@ -77,21 +81,19 @@ class SubSuite:
                 self.etos, self.test_suite_started["meta"]["id"]
             )
 
-    def outcome(self):
+    def outcome(self) -> dict:
         """Outcome of this sub suite.
 
         :return: Test suite outcome from the test suite finished event.
-        :rtype: dict
         """
         if self.finished:
             return self.test_suite_finished.get("data", {}).get("testSuiteOutcome", {})
         return {}
 
-    def start(self, identifier):
+    def start(self, identifier: str) -> None:
         """Start ETR for this sub suite.
 
         :param identifier: An identifier for logs in this sub suite.
-        :type identifier: str
         """
         FORMAT_CONFIG.identifier = identifier
         self.logger.info("Starting up the ETOS test runner", extra={"user_log": True})
@@ -112,21 +114,25 @@ class SubSuite:
         finally:
             self.release()
 
-    def release(self):
+    def release(self) -> None:
         """Release this sub suite."""
         self.logger.info(
             "Check in test environment %r", self.environment["id"], extra={"user_log": True}
         )
-        wait_generator = self.etos.http.wait_for_request(
+        response = self.etos.http.get(
             self.etos.debug.environment_provider,
             params={"single_release": self.environment["id"]},
             timeout=60,
         )
-        for response in wait_generator:
-            if response:
-                self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
-                self.released = True
-                break
+        try:
+            response.raise_for_status()
+        except HTTPError:
+            self.logger.exception(
+                "Failed to check in %r", self.environment["id"], extra={"user_log": True}
+            )
+            raise
+        self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
+        self.released = True
 
 
 class TestSuite:  # pylint:disable=too-many-instance-attributes
@@ -138,7 +144,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
     __activity_triggered = None
     __activity_finished = None
 
-    def __init__(self, etos, params, suite):
+    def __init__(self, etos: ETOS, params: ESRParameters, suite: dict) -> None:
         """Initialize a TestSuite instance."""
         self.etos = etos
         self.params = params
@@ -148,7 +154,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         self.sub_suites = []
 
     @property
-    def sub_suite_environments(self):
+    def sub_suite_environments(self) -> Iterator[dict]:
         """All sub suite environments from the environment provider.
 
         Each sub suite environment is an environment for the sub suites to execute in.
@@ -189,64 +195,50 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             )
 
     @property
-    def all_finished(self):
+    def all_finished(self) -> bool:
         """Whether or not all sub suites are finished."""
         return all(sub_suite.finished for sub_suite in self.sub_suites)
 
-    def __environment_activity_triggered(self, test_suite_started_id):
+    def __environment_activity_triggered(self, test_suite_started_id: str) -> dict:
         """Activity triggered event from the environment provider.
 
         :param test_suite_started_id: The ID that the activity triggered links to.
-        :type test_suite_started_id: str
         :return: An activity triggered event dictionary.
-        :rtype: dict
         """
         if self.__activity_triggered is None:
             self.__activity_triggered = request_activity_triggered(self.etos, test_suite_started_id)
         return self.__activity_triggered
 
-    def __environment_activity_finished(self, activity_triggered_id):
+    def __environment_activity_finished(self, activity_triggered_id: str) -> dict:
         """Activity finished event from the environment provider.
 
         :param activity_triggered_id: The ID that the activity finished links to.
-        :type activity_triggered_id: str
         :return: An activity finished event dictionary.
-        :rtype: dict
         """
         if self.__activity_finished is None:
             self.__activity_finished = request_activity_finished(self.etos, activity_triggered_id)
         return self.__activity_finished
 
-    def _download_sub_suite(self, environment):
+    def _download_sub_suite(self, environment: dict) -> dict:
         """Download a sub suite from an EnvironmentDefined event.
 
         :param environment: Environment defined event to download from.
-        :type environment: dict
         :return: Downloaded sub suite information.
-        :rtype: dict
         """
         if environment["data"].get("uri") is None:
             return None
         uri = environment["data"]["uri"]
         json_header = {"Accept": "application/json"}
-        json_response = self.etos.http.wait_for_request(
-            uri,
-            headers=json_header,
-        )
-        suite = {}
-        for suite in json_response:
-            break
-        else:
-            raise TimeoutError("Could not download sub suite instructions")
-        return suite
 
-    def _announce(self, header, body):
+        response = self.etos.http.get(uri, headers=json_header)
+        response.raise_for_status()
+        return response.json()
+
+    def _announce(self, header: str, body: str) -> None:
         """Send an announcement over Eiffel.
 
         :param header: Header of the announcement.
-        :type header: str
         :param body: Body of the announcement.
-        :type body: str
         """
         self.etos.events.send_announcement_published(
             f"[ESR] {header}",
@@ -255,11 +247,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             {"CONTEXT": self.etos.config.get("context")},
         )
 
-    def _send_test_suite_started(self):
+    def _send_test_suite_started(self) -> EiffelTestSuiteStartedEvent:
         """Send a test suite started event.
 
         :return: Test suite started event.
-        :rtype: :obj:`eiffellib.events.EiffelTestSuiteStartedEvent`
         """
         test_suite_started = EiffelTestSuiteStartedEvent()
 
@@ -280,7 +271,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         }
         return self.etos.events.send(test_suite_started, links, data)
 
-    def start(self):
+    def start(self) -> None:
         """Send test suite started, trigger and wait for all sub suites to start."""
         self._announce("Starting tests", f"Starting up sub suites for '{self.suite.get('name')}'")
 
@@ -339,7 +330,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             extra={"user_log": True},
         )
 
-    def release_all(self):
+    def release_all(self) -> None:
         """Release all, unreleased, sub suites."""
         self.logger.info("Releasing all sub suite environments")
         for sub_suite in self.sub_suites:
@@ -347,15 +338,12 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                 sub_suite.release()
         self.logger.info("All sub suite environments are released")
 
-    def finish(self, verdict, conclusion, description):
+    def finish(self, verdict: str, conclusion: str, description: str) -> None:
         """Send test suite finished for this test suite.
 
         :param verdict: Verdict of the execution.
-        :type verdict: str
         :param conclusion: Conclusion taken on the results.
-        :type conclusion: str
         :param description: Description of the verdict and conclusion.
-        :type description: str
         """
         self.etos.events.send_test_suite_finished(
             self.test_suite_started,
@@ -368,11 +356,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         )
         self.logger.info("Test suite finished.")
 
-    def results(self):
+    def results(self) -> tuple[str, str, str]:
         """Test results for this execution.
 
         :return: Verdict, conclusion and description.
-        :rtype: tuple
         """
         verdict = "INCONCLUSIVE"
         conclusion = "SUCCESSFUL"
