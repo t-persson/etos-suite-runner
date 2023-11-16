@@ -41,8 +41,7 @@ class Listener(threading.Thread):
     def __init__(self, lock: threading.Lock, log_file: pathlib.Path, event_file: pathlib.Path):
         """Initialize ETOS library."""
         super().__init__()
-        # self.identifier = self.tercc.meta.event_id
-        self.identifier = "kalle"
+        self.identifier = self.tercc.meta.event_id
         self.lock = lock
         self.log_file = log_file
         self.event_file = event_file
