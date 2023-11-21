@@ -15,8 +15,9 @@
 # limitations under the License.
 """Create a queue for log listener."""
 import time
-from threading import Lock
 from pathlib import Path
+from threading import Lock
+
 from log_listener.listener import Listener
 
 
@@ -25,7 +26,7 @@ def main():
     path = Path("./empty")
     path.touch()
 
-    listener = Listener(Lock(), path)
+    listener = Listener(Lock(), path, path)
     listener.start()
     while listener.rabbitmq is None:
         time.sleep(0.1)
