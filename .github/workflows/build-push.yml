@@ -79,7 +79,7 @@ jobs:
         valueFile: 'manifests/base/kustomization.yaml'
         changes: |
           {
-            "configMapGenerator[0].literals[0]": "SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:${{ needs.build_esr.outputs.esrVersion }}"
+            "configMapGenerator[0].literals[0]": "SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:${{ needs.build_esr.outputs.esrVersion }}",
             "configMapGenerator[0].literals[1]": "LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:${{ needs.build_listener.outputs.logListenerVersion }}"
           }
         branch: main
