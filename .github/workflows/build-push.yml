@@ -1,0 +1,82 @@
+name: Build and push
+
+on:
+  pull_request_target:
+    branches: [ "main" ]
+    types:
+      - closed
+  workflow_dispatch:
+
+jobs:
+  build_api:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build app image
+      run: docker build . --tag image
+
+    - name: Log into registry
+      run: echo "${{ secrets.REGISTRYPASSWORD }}" | docker login registry.nordix.org -u ${{ secrets.REGISTRYUSERNAME }} --password-stdin
+
+    - name: Push app image
+      id: image
+      run: |
+        IMAGE_ID=registry.nordix.org/eiffel/etos-suite-runner
+        # Strip git ref prefix from version
+        VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+        # Strip "v" prefix from tag name
+        [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+        # Use Docker `latest` tag convention
+        [ "$VERSION" == "main" ] && VERSION=$(echo ${{ github.sha }} | cut -c1-8)
+        echo IMAGE_ID=$IMAGE_ID
+        echo VERSION=$VERSION
+        docker tag image $IMAGE_ID:$VERSION
+        docker push $IMAGE_ID:$VERSION
+        echo $IMAGE_ID:$VERSION
+        echo "::set-output name=version::$VERSION"
+    - name: Update manifests
+      uses: fjogeleit/yaml-update-action@main
+      with:
+        valueFile: 'manifests/base/api/deployment.yaml'
+        propertyPath: 'configMapGenerator[0].literals[0]'
+        value: LOG_LISTENER=registry.nordix.org/eiffel/etos-suite-runner:${{ steps.image.outputs.version }}
+        branch: main
+        commitChange: true
+        message: Updating API manifest image to version ${{ steps.image.outputs.version }}
+  build_worker:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build app image
+      run: docker build . -f Dockerfile.log_listener --tag image
+
+    - name: Log into registry
+      run: echo "${{ secrets.REGISTRYPASSWORD }}" | docker login registry.nordix.org -u ${{ secrets.REGISTRYUSERNAME }} --password-stdin
+
+    - name: Push app image
+      id: image
+      run: |
+        IMAGE_ID=registry.nordix.org/eiffel/etos-log-listener
+        # Strip git ref prefix from version
+        VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+        # Strip "v" prefix from tag name
+        [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+        # Use Docker `latest` tag convention
+        [ "$VERSION" == "main" ] && VERSION=$(echo ${{ github.sha }} | cut -c1-8)
+        echo IMAGE_ID=$IMAGE_ID
+        echo VERSION=$VERSION
+        docker tag image $IMAGE_ID:$VERSION
+        docker push $IMAGE_ID:$VERSION
+        echo $IMAGE_ID:$VERSION
+        echo "::set-output name=version::$VERSION"
+    - name: Update manifests
+      uses: fjogeleit/yaml-update-action@main
+      with:
+        valueFile: 'manifests/base/kustomization.yaml'
+        propertyPath: 'configMapGenerator[0].literals[1]'
+        value: LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:${{ steps.image.outputs.version }}
+        branch: main
+        commitChange: true
+        message: Updating SSE manifest image to version ${{ steps.image.outputs.version }}
