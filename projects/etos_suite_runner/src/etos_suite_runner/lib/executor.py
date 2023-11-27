@@ -21,6 +21,17 @@ from typing import Union
 from cryptography.fernet import Fernet
 from etos_lib import ETOS
 from requests.auth import HTTPBasicAuth, HTTPDigestAuth
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError
+
+
+class TestStartException(Exception):
+    """Exception when starting tests."""
+
+    def __init__(self, message: dict):
+        """Initialize with a dict instead of str."""
+        super().__init__(str(message))
+        self.error = message.get("error", "Unknown error when starting tests")
 
 
 class Executor:  # pylint:disable=too-few-public-methods
@@ -77,7 +88,12 @@ class Executor:  # pylint:disable=too-few-public-methods
         if request.get("auth"):
             request["auth"] = self.__auth(**request["auth"])
         method = getattr(self.etos.http, request.pop("method").lower())
-        response = method(**request)
-        response.raise_for_status()
+        try:
+            response = method(**request)
+            response.raise_for_status()
+        except HTTPError as http_error:
+            raise TestStartException(http_error.response.json()) from http_error
+        except RequestsConnectionError as connection_error:
+            raise TestStartException({"error": str(connection_error)}) from connection_error
         self.logger.info("%r", response)
         self.logger.debug("%r", response.text)

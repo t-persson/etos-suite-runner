@@ -26,7 +26,7 @@ from requests.exceptions import HTTPError
 
 from .esr_parameters import ESRParameters
 from .exceptions import EnvironmentProviderException
-from .executor import Executor
+from .executor import Executor, TestStartException
 from .graphql import (
     request_activity_finished,
     request_activity_triggered,
@@ -37,10 +37,11 @@ from .graphql import (
 from .log_filter import DuplicateFilter
 
 
-class SubSuite:
+class SubSuite:  # pylint:disable=too-many-instance-attributes
     """Handle test results and tracking of a single sub suite."""
 
     released = False
+    failed = False
 
     def __init__(self, etos: ETOS, environment: dict, main_suite_id: str) -> None:
         """Initialize a sub suite."""
@@ -98,7 +99,14 @@ class SubSuite:
         FORMAT_CONFIG.identifier = identifier
         self.logger.info("Starting up the ETOS test runner", extra={"user_log": True})
         executor = Executor(self.etos)
-        executor.run_tests(self.environment)
+        try:
+            executor.run_tests(self.environment)
+        except TestStartException as exception:
+            self.failed = True
+            self.logger.error(
+                "Failed to start sub suite: %s", exception.error, extra={"user_log": True}
+            )
+            raise
         self.logger.info("ETR triggered.")
         timeout = time.time() + self.etos.debug.default_test_result_timeout
         try:
@@ -323,6 +331,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         finally:
             for thread in threads:
                 thread.join()
+
         self.logger.info(
             "All sub suites for %r (%r) have now finished",
             self.suite.get("name"),
@@ -364,6 +373,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         verdict = "INCONCLUSIVE"
         conclusion = "SUCCESSFUL"
         description = ""
+        failed = [sub_suite for sub_suite in self.sub_suites if sub_suite.failed]
 
         if self.empty:
             verdict = "INCONCLUSIVE"
@@ -377,6 +387,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
             description = (
                 f"No sub suites started at all for {self.test_suite_started.meta.event_id}."
             )
+        elif failed:
+            verdict = "INCONCLUSIVE"
+            conclusion = "FAILED"
+            description = f"{len(failed)} sub suites failed to start"
         elif not self.all_finished:
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"
