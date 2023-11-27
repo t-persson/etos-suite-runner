@@ -67,4 +67,4 @@ jobs:
         uses: docker/build-push-action@v2
         with:
           context: .
-          dockerfile: Dockerfile.listener
+          dockerfile: Dockerfile.log_listener
