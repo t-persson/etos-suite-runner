@@ -16,6 +16,7 @@
 """Executor handler module."""
 import logging
 import os
+from json import JSONDecodeError
 from typing import Union
 
 from cryptography.fernet import Fernet
@@ -92,7 +93,10 @@ class Executor:  # pylint:disable=too-few-public-methods
             response = method(**request)
             response.raise_for_status()
         except HTTPError as http_error:
-            raise TestStartException(http_error.response.json()) from http_error
+            try:
+                raise TestStartException(http_error.response.json()) from http_error
+            except JSONDecodeError:
+                raise TestStartException({"error": http_error.response.text}) from http_error
         except RequestsConnectionError as connection_error:
             raise TestStartException({"error": str(connection_error)}) from connection_error
         self.logger.info("%r", response)
