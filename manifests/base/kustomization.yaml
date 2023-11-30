@@ -3,5 +3,5 @@ kind: Kustomization
 configMapGenerator:
   - name: etos-suite-starter
     literals:
-      - SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:899019c0
-      - LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:899019c0
+      - SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:90e06be6
+      - LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:90e06be6
