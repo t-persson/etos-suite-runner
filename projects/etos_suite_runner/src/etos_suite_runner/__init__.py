@@ -15,7 +15,8 @@
 # limitations under the License.
 """ETOS suite runner module."""
 import os
-from importlib.metadata import version, PackageNotFoundError
+from importlib.metadata import PackageNotFoundError, version
+
 from etos_lib.logging.logger import setup_logging
 
 try:
@@ -27,4 +28,5 @@ except PackageNotFoundError:
 BASE_DIR = os.path.dirname(os.path.relpath(__file__))
 DEV = os.getenv("DEV", "false").lower() == "true"
 ENVIRONMENT = "development" if DEV else "production"
+os.environ["ENVIRONMENT_PROVIDER_DISABLE_LOGGING"] = "true"
 setup_logging("ETOS Suite Runner", VERSION, ENVIRONMENT)

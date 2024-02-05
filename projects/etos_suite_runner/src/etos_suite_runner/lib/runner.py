@@ -17,7 +17,9 @@
 import logging
 from multiprocessing.pool import ThreadPool
 
+from environment_provider_api.backend.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
+from jsontas.jsontas import JsonTas
 
 from .exceptions import EnvironmentProviderException
 from .suite import TestSuite
@@ -43,16 +45,17 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
         self.params = params
         self.etos = etos
 
-    def _release_environment(self, task_id):
-        """Release an environment from the environment provider.
-
-        :param task_id: Task ID to release.
-        :type task_id: str
-        """
-        response = self.etos.http.get(
-            self.etos.debug.environment_provider, params={"release": task_id}, timeout=60
+    def _release_environment(self):
+        """Release an environment from the environment provider."""
+        # TODO: We should remove jsontas as a requirement for this function.
+        # Passing variables as keyword argument to make it easier to transition to a function where
+        # jsontas is not required.
+        jsontas = JsonTas()
+        status, message = release_full_environment(
+            etos=self.etos, jsontas=jsontas, suite_id=self.params.tercc.meta.event_id
         )
-        response.raise_for_status()
+        if not status:
+            self.logger.error(message)
 
     def start_suites_and_wait(self):
         """Get environments and start all test suites."""
@@ -66,10 +69,8 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
             if status.get("error") is not None:
                 raise EnvironmentProviderException(status["error"], self.etos.config.get("task_id"))
         finally:
-            task_id = self.etos.config.get("task_id")
             self.logger.info("Release the full test environment.")
-            if task_id is not None:
-                self._release_environment(task_id)
+            self._release_environment()
 
     def run(self, test_suite):
         """Run test suite runner.

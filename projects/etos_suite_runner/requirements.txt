@@ -16,6 +16,7 @@
 # scipy==1.0
 #
 PyScaffold==3.2.3
-packageurl-python==0.9.1
+packageurl-python~=0.11
 cryptography~=41.0
 etos_lib==4.0.0
+# environment_provider@git+https://github.com/t-persson/etos-environment-provider@01ca7c4914fbdbaa4af79689cb768ab011fce410
