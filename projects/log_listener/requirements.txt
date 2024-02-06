@@ -17,5 +17,5 @@
 #
 PyScaffold==3.2.3
 eiffellib[rabbitmq]==2.4.1
-fastapi==0.95.2
+fastapi==0.109.1
 uvicorn==0.22.0
