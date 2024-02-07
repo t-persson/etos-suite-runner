@@ -19,4 +19,4 @@ PyScaffold==3.2.3
 packageurl-python~=0.11
 cryptography~=41.0
 etos_lib==4.0.0
-# environment_provider@git+https://github.com/t-persson/etos-environment-provider@01ca7c4914fbdbaa4af79689cb768ab011fce410
+environment_provider@https://github.com/eiffel-community/etos-environment-provider/releases/download/3.0.0/environment_provider-3.0.0-py2.py3-none-any.whl
