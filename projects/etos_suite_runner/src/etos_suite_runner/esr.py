@@ -102,12 +102,13 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         if not status:
             self.logger.error(message)
 
-    def run_suites(self, triggered: EiffelActivityTriggeredEvent) -> None:
+    def run_suites(self, triggered: EiffelActivityTriggeredEvent) -> list[str]:
         """Start up a suite runner handling multiple suites that execute within test runners.
 
         Will only start the test activity if there's a 'slot' available.
 
         :param triggered: Activity triggered.
+        :return: List of main suite IDs
         """
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
@@ -125,12 +126,15 @@ class ESR:  # pylint:disable=too-many-instance-attributes
 
         try:
             self.logger.info("Get test environment.")
-            threading.Thread(target=self._request_environment, args=(ids,), daemon=True).start()
+            threading.Thread(
+                target=self._request_environment, args=(ids.copy(),), daemon=True
+            ).start()
 
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
 
             self.logger.info("Starting ESR.")
             runner.start_suites_and_wait()
+            return ids
         except EnvironmentProviderException:
             self.logger.info("Release test environment.")
             self._release_environment()
@@ -143,8 +147,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 
-    def run(self) -> None:
-        """Run the ESR main loop."""
+    def run(self) -> list[str]:
+        """Run the ESR main loop.
+
+        :return: List of test suites (main suites) that were started.
+        """
         tercc_id = None
         try:
             tercc_id = self.params.tercc.meta.event_id
@@ -186,10 +193,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise
 
         try:
-            self.run_suites(triggered)
+            ids = self.run_suites(triggered)
             self.etos.events.send_activity_finished(
                 triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
             )
+            return ids
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
             self.logger.exception(

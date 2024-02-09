@@ -314,6 +314,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                     "Environment received. Starting up a sub suite", extra={"user_log": True}
                 )
                 sub_suite_definition = self._download_sub_suite(sub_suite_environment)
+                if sub_suite_definition is None:
+                    raise EnvironmentProviderException(
+                        "URL to sub suite is missing", self.etos.config.get("task_id")
+                    )
                 sub_suite_definition["id"] = sub_suite_environment["meta"]["id"]
                 sub_suite = SubSuite(
                     self.etos, sub_suite_definition, self.suite["test_suite_started_id"]

@@ -333,3 +333,14 @@ TERCC_EMPTY = {
     },
     "links": [{"type": "CAUSE", "target": "349f9bf9-0fc7-4dd4-b641-ac5f1c9ea7aa"}],
 }
+
+
+ARTIFACT_CREATED = {
+    "data": {"identity": "pkg:etos-suite-runner/tests"},
+    "meta": {
+        "type": "EiffelArtifactCreatedEvent",
+        "id": "349f9bf9-0fc7-4dd4-b641-ac5f1c9ea7aa",
+        "time": 1664260578384,
+        "version": "3.3.0",
+    },
+}
