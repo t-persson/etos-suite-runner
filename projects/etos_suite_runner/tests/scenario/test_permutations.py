@@ -28,7 +28,6 @@ from eiffellib.events import (
 )
 from etos_lib.lib.config import Config
 from etos_lib.lib.debug import Debug
-
 from etos_suite_runner.esr import ESR
 from tests.library.fake_database import FakeDatabase
 from tests.library.fake_server import FakeServer
@@ -200,9 +199,7 @@ class TestPermutationScenario(TestCase):
                 self.logger.info("STEP: Verify that the ESR executes without errors.")
                 suite_ids = esr.run()
 
-                self.assertEqual(
-                    len(suite_ids), 2, "There shall only be a single test suite started."
-                )
+                self.assertEqual(len(suite_ids), 2, "There shall only be two test suite started.")
                 for suite_id in suite_ids:
                     suite_finished = Handler.get_from_db(
                         "EiffelTestSuiteFinishedEvent", {"links.target": suite_id}

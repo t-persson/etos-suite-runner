@@ -24,7 +24,7 @@ from etcd3gw.lease import Lease
 
 
 class FakeDatabase:
-    """A fake database that follows the etcd client."""
+    """A fake database that imitates the etcd client."""
 
     lock = RLock()
 
