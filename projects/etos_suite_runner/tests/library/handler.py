@@ -14,15 +14,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ETOS suite runner request handler."""
-import os
 import json
 import logging
 from http.server import BaseHTTPRequestHandler
-from uuid import uuid4
+from urllib.parse import urlparse
 
-from graphql import parse
-from etos_lib.lib.debug import Debug
+import mongomock
 import requests
+from eiffellib.events import EiffelTestSuiteFinishedEvent, EiffelTestSuiteStartedEvent
+from etos_lib.lib.debug import Debug
+from graphql import parse
+
+CLIENT = mongomock.MongoClient()
+DB = CLIENT["Database"]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -30,10 +34,8 @@ class Handler(BaseHTTPRequestHandler):
 
     logger = logging.getLogger(__name__)
     requests = []
-    sub_suites_and_main_suites = {}
-    environments = {}
-    suite_runner_ids = []
-    activities = {}
+    uploads = {}
+    debug = Debug()
 
     def __init__(self, tercc, *args, **kwargs):
         """Initialize a BaseHTTPRequestHandler. This must be initialized with functools.partial.
@@ -46,7 +48,6 @@ class Handler(BaseHTTPRequestHandler):
         :param tercc: Test execution recipe collection for a test scenario.
         :type tercc: dict
         """
-        self.debug = Debug()
         self.tercc = tercc
         super().__init__(*args, **kwargs)
 
@@ -54,23 +55,37 @@ class Handler(BaseHTTPRequestHandler):
     def reset(cls):
         """Reset the handler. This has to be done after each test."""
         cls.requests.clear()
-        cls.sub_suites_and_main_suites.clear()
-        cls.environments.clear()
-        cls.activities.clear()
-        cls.suite_runner_ids.clear()
+        CLIENT.drop_database("Database")
+        cls.uploads.clear()
 
-    @property
-    def main_suites(self):
-        """Test suites started sent by ESR.
+    @classmethod
+    def insert_to_db(cls, event):
+        """Insert an event to the database.
 
-        :return: A list of test suite started stored in the ETOS library debug module.
+        :param event: Event to store into database.
+        :type event: :obj:`eiffellib.events.eiffel_base_event.EiffelBaseEvent`
+        """
+        collection = DB[event.meta.type]
+        response = collection.find_one({"_id": event.meta.event_id})
+        if not response:
+            doc = event.json
+            doc["_id"] = event.meta.event_id
+            collection.insert_one(doc)
+
+    @classmethod
+    def get_from_db(cls, collection_name, query):
+        """Send a query to a database collection.
+
+        :param collection_name: The collection to query.
+        :type collection_name: str
+        :param query: The query to send.
+        :type query: dict
+        :return: a list of events from the database.
         :rtype: list
         """
-        started = []
-        for event in self.debug.events_published:
-            if event.meta.type == "EiffelTestSuiteStartedEvent":
-                started.append(event)
-        return started
+        for event in cls.debug.events_published:
+            cls.insert_to_db(event)
+        return list(DB[collection_name].find(query))
 
     def store_request(self, data):
         """Store a request for testing purposes.
@@ -101,184 +116,20 @@ class Handler(BaseHTTPRequestHandler):
                         )
         raise TypeError("Not a valid GraphQL query")
 
-    def artifact_created(self):
-        """Artifact under test.
+    def to_graphql(self, name, data):
+        """Convert an Eiffel event dictionary to a GraphQL response.
 
-        :return: A GraphQL response for an artifact.
+        :param name: Name of the event, in graphql.
+        :type name: str
+        :param data: Data to set in graphql response.
+        :type data: list or None
+        :return: A graphql-valid dictionary
         :rtype: dict
         """
-        return {
-            "data": {
-                "artifactCreated": {
-                    "edges": [
-                        {
-                            "node": {
-                                "data": {
-                                    "identity": "pkg:etos/suite-runner",
-                                },
-                                "links": [],
-                                "meta": {
-                                    "id": "b44e0d4a-bc88-4c2a-b808-d336448c959e",
-                                    "time": 1664263414557,
-                                    "type": "EiffelArtifactCreatedEvent",
-                                    "version": "3.0.0",
-                                },
-                            }
-                        }
-                    ]
-                }
-            }
-        }
-
-    def environment_defined(self, query):
-        """Create environment defined events for all expected sub suites.
-
-        :param query: GraphQL query string.
-        :type query: dict
-        :return: A GraphQL response for several environment defined.
-        :rtype: dict
-        """
-        if self.suite_runner_ids and self.main_suites:
-            activity = None
-            for activity_id, activity_event in self.activities.items():
-                if activity_id == query["links.target"]:
-                    activity = activity_event
-            if activity is None:
-                return {"data": {"environmentDefined": {"edges": []}}}
-            activity_id = activity["meta"]["id"]
-            if self.environments.get(activity_id):
-                return {"data": {"environmentDefined": {"edges": self.environments[activity_id]}}}
-            link_id = None
-            for link in activity["links"]:
-                if link["type"] == "CONTEXT":
-                    link_id = link["target"]
-                    break
-            self.environments.setdefault(activity_id, [])
-
-            for suite in self.main_suites:
-                if suite.meta.event_id != link_id:
-                    continue
-                host = os.getenv("ETOS_ENVIRONMENT_PROVIDER")
-                tercc = None
-                index = None
-                for number, batch in enumerate(self.tercc["data"]["batches"]):
-                    if batch["name"] == suite.data.data.get("name"):
-                        index = number
-                        tercc = batch
-                for subindex, _ in enumerate(tercc["recipes"]):
-                    sub_suite_name = f"{suite.data.data.get('name')}_SubSuite_{subindex+1}"
-                    self.environments[activity_id].append(
-                        {
-                            "node": {
-                                "data": {
-                                    "name": sub_suite_name,
-                                    "uri": f"{host}/sub_suite/{index}/{subindex}",
-                                },
-                                "meta": {"id": str(uuid4())},
-                            }
-                        }
-                    )
-            return {"data": {"environmentDefined": {"edges": self.environments[activity_id]}}}
-        return {"data": {"environmentDefined": {"edges": []}}}
-
-    def test_suite_started(self, query):
-        """Create a test suite started for sub suites based on ESR suites.
-
-        :param query: GraphQL query string.
-        :type query: dict
-        :return: A graphql response with a test suite started for a "started" sub suite.
-        :rtype: dict
-        """
-        edges = []
-        for key, values in self.sub_suites_and_main_suites.items():
-            if key == query["links.target"]:
-                for value in values:
-                    edges.append(
-                        {
-                            "node": {
-                                "data": {"name": value["name"]},
-                                "meta": {"id": value["id"]},
-                            }
-                        }
-                    )
-                break
-        return {"data": {"testSuiteStarted": {"edges": edges}}}
-
-    def test_suite_finished(self, query):
-        """Create a test suite finished event based on sub suites and ESR suites.
-
-        :param query: GraphQL query string.
-        :type query: dict
-        :return: A graphql response with a test suite finished for a "started" sub suite.
-        :rtype: dict
-        """
-        edges = []
-        for key, values in self.sub_suites_and_main_suites.items():
-            if key == query["links.target"]:
-                for value in values:
-                    edges.append(
-                        {
-                            "node": {
-                                "data": {"testSuiteOutcome": {"verdict": "PASSED"}},
-                                "meta": {"id": value["finished"]},
-                            }
-                        }
-                    )
-                break
-        return {"data": {"testSuiteFinished": {"edges": edges}}}
-
-    def activity_triggered(self, query):
-        """Create an activity triggered event.
-
-        :param query: GraphQL query string.
-        :type query: dict
-        :return: A graphql response with an activity triggered for a triggered environment provider.
-        :rtype: dict
-        """
-        suite_id = query["links.target"]
-        event_id = str(uuid4())
-        activity = {
-            "data": {
-                "activityTriggered": {
-                    "meta": {"id": event_id},
-                    "links": [{"type": "CONTEXT", "target": suite_id}],
-                }
-            }
-        }
-        self.activities[event_id] = activity["data"]["activityTriggered"]
-        return activity
-
-    def activity_finished(self, query):
-        """Create an activity finished event.
-
-        :param query: GraphQL query string.
-        :type query: dict
-        :return: A graphql response with an activity finished for a "finished" activity.
-        :rtype: dict
-        """
-        if self.environments:
-            for activity in self.activities:
-                if activity == query["links.target"]:
-                    return {
-                        "data": {
-                            "activityFinished": {
-                                "edges": [
-                                    {
-                                        "node": {
-                                            "meta": {"id": str(uuid4())},
-                                            "data": {
-                                                "activityOutcome": {
-                                                    "conclusion": "SUCCESSFUL",
-                                                    "description": None,
-                                                }
-                                            },
-                                        }
-                                    }
-                                ]
-                            }
-                        }
-                    }
-        return {"data": {"activityFinished": {"edges": []}}}
+        if data:
+            edges = [{"node": d} for d in data]
+            return {"data": {name: {"edges": edges}}}
+        return {"data": {name: {"edges": []}}}
 
     def do_graphql(self, query_name, query):  # pylint:disable=too-many-return-statements
         """Handle GraphQL queries to a fake ER.
@@ -290,86 +141,71 @@ class Handler(BaseHTTPRequestHandler):
         :return: JSON data mimicking an ER.
         :rtype: dict
         """
+        data = None
+        if query_name == "testExecutionRecipeCollectionCreated":
+            data = self.get_from_db("EiffelTestExecutionRecipeCollectionCreatedEvent", query)
         if query_name == "artifactCreated":
-            return self.artifact_created()
+            data = self.get_from_db("EiffelArtifactCreatedEvent", query)
         if query_name == "activityTriggered":
-            return self.activity_triggered(query)
+            data = self.get_from_db("EiffelActivityTriggeredEvent", query)
         if query_name == "activityFinished":
-            return self.activity_finished(query)
+            data = self.get_from_db("EiffelActivityFinishedEvent", query)
+            for event in data:
+                # The GraphQL API changes the outcome fields since they are the same for multiple
+                # events so we have to correct the data here as well.
+                event["data"]["activityOutcome"] = event["data"].pop("outcome")
         if query_name == "environmentDefined":
-            return self.environment_defined(query)
+            data = self.get_from_db("EiffelEnvironmentDefinedEvent", query)
         if query_name == "testSuiteStarted":
-            return self.test_suite_started(query)
+            data = self.get_from_db("EiffelTestSuiteStartedEvent", query)
         if query_name == "testSuiteFinished":
-            return self.test_suite_finished(query)
-        return None
+            data = self.get_from_db("EiffelTestSuiteFinishedEvent", query)
+            for event in data:
+                # The GraphQL API changes the outcome fields since they are the same for multiple
+                # events so we have to correct the data here as well.
+                event["data"]["testSuiteOutcome"] = event["data"].pop("outcome")
+        return self.to_graphql(query_name, data)
 
-    def sub_suite(self):
-        """Get fake sub suite information mimicking the ETOS environment provider.
+    def fake_start_etr(self, request_data):
+        """Handle the ETR start requests from the ESR.
 
-        :return: Sub suite definitions that the ESR can act upon.
-        :rtype: dict
+        :param request_data: Request data from the ESR, with instructions.
+        :type request_data: bytes
         """
-        subindex = int(self.path.split("/")[-1])
-        index = int(self.path.split("/")[-2])
-        sub_suite = self.tercc["data"]["batches"][index].copy()
-        for main_suite in self.main_suites:
-            if main_suite.data.data.get("name") == sub_suite["name"]:
-                main_suite_id = main_suite.meta.event_id
-
-        sub_suite["name"] = f"{sub_suite['name']}_SubSuite_{subindex+1}"
-        host = os.getenv("ETOS_ENVIRONMENT_PROVIDER")
-        sub_suite["test_suite_started_id"] = main_suite_id
-        self.sub_suites_and_main_suites.setdefault(main_suite_id, [])
-        self.sub_suites_and_main_suites[main_suite_id].append(
-            {
-                "name": sub_suite["name"],
-                "id": main_suite_id,
-                "finished": str(uuid4()),
-            }
+        json_request = json.loads(request_data)
+        environment = DB["EiffelEnvironmentDefinedEvent"].find_one(
+            {"meta.id": json_request["environment"]["ENVIRONMENT_ID"]},
         )
-        sub_suite["executor"] = {"request": {"method": "GET", "url": f"{host}/etr"}}
-        return sub_suite
-
-    def do_environment_provider_post(self, request_data):
-        """Handle POST requests to a fake environment provider.
-
-        :return: JSON data mimicking the ETOS environment provider.
-        :rtype: dict
-        """
-        json_data = json.loads(request_data)
-        if json_data.get("suite_runner_ids") is not None and not self.suite_runner_ids:
-            self.suite_runner_ids.extend(json_data["suite_runner_ids"].split(","))
-        return {"result": "success", "data": {"id": "12345"}}
-
-    def do_environment_provider_get(self):
-        """Handle GET requests to a fake environment provider.
-
-        :return: JSON data mimicking the ETOS environment provider.
-        :rtype: dict
-        """
-        if self.path.startswith("/sub_suite"):
-            return self.sub_suite()
-        if self.path == "/etr" or "?single_release" in self.path or "?release" in self.path:
-            # These are not being tested, just return SUCCESS.
-            return {"status": "SUCCESS"}
-        if self.path == "/?id=12345":
-            if self.environments:
-                return {"status": "SUCCESS"}
-            return {"status": "PENDING"}
-        return None
+        sub_suite = json.loads(self.uploads.get(urlparse(environment["data"]["uri"]).path))
+        started = EiffelTestSuiteStartedEvent()
+        started.data.add("name", environment["data"]["name"])
+        started.links.add("CAUSE", sub_suite["test_suite_started_id"])
+        started.validate()
+        finished = EiffelTestSuiteFinishedEvent()
+        finished.data.add("outcome", {"verdict": "PASSED", "conclusion": "SUCCESSFUL"})
+        finished.links.add("TEST_SUITE_EXECUTION", started)
+        finished.validate()
+        Debug().events_published.append(started)
+        Debug().events_published.append(finished)
 
     # pylint:disable=invalid-name
     def do_POST(self):
         """Handle POST requests."""
         self.store_request(self.request)
         request_data = self.rfile.read(int(self.headers["Content-Length"]))
-        try:
-            query_name, query = self.get_gql_query(request_data)
-        except (TypeError, KeyError):
-            response = self.do_environment_provider_post(request_data)
+        if self.path.startswith("/log"):
+            self.uploads[self.path] = request_data.decode()
+            response = {}
+        elif self.path.startswith("/etr"):
+            self.fake_start_etr(request_data)
+            response = {}
         else:
-            response = self.do_graphql(query_name, query)
+            try:
+                query_name, query = self.get_gql_query(request_data)
+            except (TypeError, KeyError):
+                response = {}
+            else:
+                response = self.do_graphql(query_name, query)
 
         self.send_response(requests.codes["ok"])
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -382,11 +218,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         """Handle GET requests."""
         self.store_request(self.request)
-        response = self.do_environment_provider_get()
 
+        response = self.uploads.get(self.path)
         self.send_response(requests.codes["ok"])
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
-
-        response_content = json.dumps(response)
-        self.wfile.write(response_content.encode("utf-8"))
+        self.wfile.write(response.encode("utf-8"))

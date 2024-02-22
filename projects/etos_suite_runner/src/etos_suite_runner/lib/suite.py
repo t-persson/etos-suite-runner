@@ -20,9 +20,11 @@ import time
 from typing import Iterator
 
 from eiffellib.events import EiffelTestSuiteStartedEvent
+from environment_provider.lib.registry import ProviderRegistry
+from environment_provider_api.backend.environment import release_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
-from requests.exceptions import HTTPError
+from jsontas.jsontas import JsonTas
 
 from .esr_parameters import ESRParameters
 from .exceptions import EnvironmentProviderException
@@ -120,25 +122,28 @@ class SubSuite:  # pylint:disable=too-many-instance-attributes
                     self.logger.info("ETOS test runner has finished", extra={"user_log": True})
                     break
         finally:
-            self.release()
+            self.release(identifier)
 
-    def release(self) -> None:
+    def release(self, testrun_id) -> None:
         """Release this sub suite."""
+        # TODO: This whole method is now a bit of a hack that needs to be cleaned up.
+        # Most cleanup is required in the environment provider so this method will stay until an
+        # update has been made there.
         self.logger.info(
             "Check in test environment %r", self.environment["id"], extra={"user_log": True}
         )
-        response = self.etos.http.get(
-            self.etos.debug.environment_provider,
-            params={"single_release": self.environment["id"]},
-            timeout=60,
+        jsontas = JsonTas()
+        registry = ProviderRegistry(etos=self.etos, jsontas=jsontas, suite_id=testrun_id)
+
+        self.logger.info(self.environment)
+        success = release_environment(
+            etos=self.etos, jsontas=jsontas, provider_registry=registry, sub_suite=self.environment
         )
-        try:
-            response.raise_for_status()
-        except HTTPError:
+        if not success:
             self.logger.exception(
                 "Failed to check in %r", self.environment["id"], extra={"user_log": True}
             )
-            raise
+            return
         self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
         self.released = True
 
@@ -179,6 +184,11 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                 self.suite["test_suite_started_id"]
             )
             if activity_triggered is None:
+                status = self.params.get_status()
+                if status.get("status") == "FAILURE":
+                    raise EnvironmentProviderException(
+                        status.get("error"), self.etos.config.get("task_id")
+                    )
                 continue
             activity_finished = self.__environment_activity_finished(
                 activity_triggered["meta"]["id"]
@@ -304,6 +314,10 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
                     "Environment received. Starting up a sub suite", extra={"user_log": True}
                 )
                 sub_suite_definition = self._download_sub_suite(sub_suite_environment)
+                if sub_suite_definition is None:
+                    raise EnvironmentProviderException(
+                        "URL to sub suite is missing", self.etos.config.get("task_id")
+                    )
                 sub_suite_definition["id"] = sub_suite_environment["meta"]["id"]
                 sub_suite = SubSuite(
                     self.etos, sub_suite_definition, self.suite["test_suite_started_id"]
@@ -344,7 +358,7 @@ class TestSuite:  # pylint:disable=too-many-instance-attributes
         self.logger.info("Releasing all sub suite environments")
         for sub_suite in self.sub_suites:
             if not sub_suite.released:
-                sub_suite.release()
+                sub_suite.release(self.params.tercc.meta.event_id)
         self.logger.info("All sub suite environments are released")
 
     def finish(self, verdict: str, conclusion: str, description: str) -> None:

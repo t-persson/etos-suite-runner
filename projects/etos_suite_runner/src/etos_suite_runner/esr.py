@@ -19,16 +19,15 @@ import logging
 import os
 import signal
 import threading
-import time
 import traceback
-from json import JSONDecodeError
 from uuid import uuid4
 
 from eiffellib.events import EiffelActivityTriggeredEvent
+from environment_provider.environment_provider import EnvironmentProvider
+from environment_provider_api.backend.environment import release_full_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
-from requests.exceptions import ConnectionError as RequestsConnectionError
-from requests.exceptions import HTTPError
+from jsontas.jsontas import JsonTas
 
 from .lib.esr_parameters import ESRParameters
 from .lib.exceptions import EnvironmentProviderException
@@ -62,109 +61,54 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
 
-    def _request_environment(self, ids: list[str]) -> tuple[str, str]:
+    def _request_environment(self, ids: list[str]) -> None:
         """Request an environment from the environment provider.
 
         :param ids: Generated suite runner IDs used to correlate environments and the suite
                     runners.
-        :return: Task ID and an error message.
         """
-        params = {
-            "suite_id": self.params.tercc.meta.event_id,
-            "suite_runner_ids": ",".join(ids),
-        }
         try:
-            response = self.etos.http.post(self.etos.debug.environment_provider, json=params)
-            response.raise_for_status()
-        except (RequestsConnectionError, HTTPError) as exception:
-            return None, str(exception)
-
-        try:
-            json_response = response.json()
-        except JSONDecodeError:
-            return None, "Could not parse JSON from the environment provider"
-
-        result = json_response.get("result", "")
-        if result.lower() != "success":
-            return (
-                None,
-                "Could not retrieve an environment from the environment provider",
+            provider = EnvironmentProvider(self.params.tercc.meta.event_id, ids, copy=False)
+            result = provider.run()
+        except Exception:
+            self.params.set_status("FAILURE", "Failed to run environment provider")
+            self.logger.error(
+                "Environment provider has failed in creating an environment for test.",
+                extra={"user_log": True},
             )
-        task_id = json_response.get("data", {}).get("id")
-        if task_id is None:
-            return None, "Did not retrieve an environment"
-        return task_id, ""
-
-    def _get_environment_status(self, task_id: str, identifier: str) -> None:
-        """Wait for an environment being provided.
-
-        :param task_id: Task ID to wait for.
-        :param identifier: An identifier to use for logging.
-        """
-        FORMAT_CONFIG.identifier = identifier
-        timeout = self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
-        end = time.time() + timeout
-        while time.time() < end:
-            response = self.etos.http.get(
-                url=self.etos.debug.environment_provider,
-                timeout=timeout,
-                params={"id": task_id},
-            )
-            response.raise_for_status()
-            json_response = response.json()
-            # dict.get() does not work here as it only sets None if the key does not exist
-            # and sometimes the key exists, but the value is None.
-            result = json_response.get("result") or {}
-            self.params.set_status(json_response.get("status"), result.get("error"))
-            if json_response and result:
-                break
-            time.sleep(5)
-        else:
-            self.params.set_status(
-                "FAILURE",
-                "Unknown Error: Did not receive an environment " f"within {timeout}s",
-            )
-        if self.params.get_status().get("error") is not None:
+            raise
+        if result.get("error") is not None:
+            self.params.set_status("FAILURE", result.get("error"))
             self.logger.error(
                 "Environment provider has failed in creating an environment for test.",
                 extra={"user_log": True},
             )
         else:
+            self.params.set_status("SUCCESS", result.get("error"))
             self.logger.info(
                 "Environment provider has finished creating an environment for test.",
                 extra={"user_log": True},
             )
 
-    def _release_environment(self, task_id: str) -> None:
-        """Release an environment from the environment provider.
-
-        :param task_id: Task ID to release.
-        """
-        response = self.etos.http.get(
-            self.etos.debug.environment_provider, params={"release": task_id}
+    def _release_environment(self) -> None:
+        """Release an environment from the environment provider."""
+        # TODO: We should remove jsontas as a requirement for this function.
+        # Passing variables as keyword argument to make it easier to transition to a function where
+        # jsontas is not required.
+        jsontas = JsonTas()
+        status, message = release_full_environment(
+            etos=self.etos, jsontas=jsontas, suite_id=self.params.tercc.meta.event_id
         )
-        response.raise_for_status()
+        if not status:
+            self.logger.error(message)
 
-    def _reserve_workers(self, ids: list[str]) -> str:
-        """Reserve workers for test.
-
-        :param ids: Generated suite runner IDs used to correlate environments and the suite
-                    runners.
-        :return: The environment provider task ID
-        """
-        self.logger.info("Request environment from environment provider", extra={"user_log": True})
-        task_id, msg = self._request_environment(ids)
-        if task_id is None:
-            raise EnvironmentProviderException(msg, task_id)
-        return task_id
-
-    def run_suites(self, triggered: EiffelActivityTriggeredEvent, tercc_id: str) -> None:
+    def run_suites(self, triggered: EiffelActivityTriggeredEvent) -> list[str]:
         """Start up a suite runner handling multiple suites that execute within test runners.
 
         Will only start the test activity if there's a 'slot' available.
 
         :param triggered: Activity triggered.
-        :param tercc_id: The ID of the tercc that is going to be executed.
+        :return: List of main suite IDs
         """
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
@@ -180,26 +124,20 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             ids.append(suite["test_suite_started_id"])
         self.logger.info("Number of test suites to run: %d", len(ids), extra={"user_log": True})
 
-        task_id = None
         try:
-            self.logger.info("Wait for test environment.")
-            task_id = self._reserve_workers(ids)
-            self.etos.config.set("task_id", task_id)
+            self.logger.info("Get test environment.")
             threading.Thread(
-                target=self._get_environment_status,
-                args=(task_id, tercc_id),
-                daemon=True,
+                target=self._request_environment, args=(ids.copy(),), daemon=True
             ).start()
 
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
 
             self.logger.info("Starting ESR.")
             runner.start_suites_and_wait()
-        except EnvironmentProviderException as exception:
-            task_id = exception.task_id
+            return ids
+        except EnvironmentProviderException:
             self.logger.info("Release test environment.")
-            if task_id is not None:
-                self._release_environment(task_id)
+            self._release_environment()
             raise
 
     @staticmethod
@@ -209,8 +147,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 
-    def run(self) -> None:
-        """Run the ESR main loop."""
+    def run(self) -> list[str]:
+        """Run the ESR main loop.
+
+        :return: List of test suites (main suites) that were started.
+        """
         tercc_id = None
         try:
             tercc_id = self.params.tercc.meta.event_id
@@ -252,10 +193,11 @@ class ESR:  # pylint:disable=too-many-instance-attributes
             raise
 
         try:
-            self.run_suites(triggered, tercc_id)
+            ids = self.run_suites(triggered)
             self.etos.events.send_activity_finished(
                 triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
             )
+            return ids
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
             self.logger.exception(
