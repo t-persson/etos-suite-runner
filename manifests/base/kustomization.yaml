@@ -5,3 +5,6 @@ configMapGenerator:
     literals:
       - SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:f209b74c
       - LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:f209b74c
+  - name: etos-suite-runner
+    literals:
+      - ETR_VERSION="3.4.0"
