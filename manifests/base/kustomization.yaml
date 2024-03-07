@@ -1,15 +1,12 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 resources:
   - ./configmap.yaml
-
 configMapGenerator:
   - name: etos-suite-starter
     literals:
-      - SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:7c392331
-      - LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:7c392331
-
+      - SUITE_RUNNER=registry.nordix.org/eiffel/etos-suite-runner:50177489
+      - LOG_LISTENER=registry.nordix.org/eiffel/etos-log-listener:50177489
 patches:
   - target:
       name: etos-suite-runner
