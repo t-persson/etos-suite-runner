@@ -14,4 +14,4 @@ patches:
     patch: |-
       - op: add
         path: /data/ETR_VERSION
-        value: 3.4.0
+        value: 3.4.1
