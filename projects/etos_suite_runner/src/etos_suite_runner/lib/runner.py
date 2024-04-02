@@ -17,7 +17,7 @@
 import logging
 from multiprocessing.pool import ThreadPool
 
-from environment_provider_api.backend.environment import release_full_environment
+from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
 

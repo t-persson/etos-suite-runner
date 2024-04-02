@@ -24,7 +24,7 @@ from uuid import uuid4
 
 from eiffellib.events import EiffelActivityTriggeredEvent
 from environment_provider.environment_provider import EnvironmentProvider
-from environment_provider_api.backend.environment import release_full_environment
+from environment_provider.environment import release_full_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas

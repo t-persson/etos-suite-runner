@@ -21,7 +21,7 @@ from typing import Iterator
 
 from eiffellib.events import EiffelTestSuiteStartedEvent
 from environment_provider.lib.registry import ProviderRegistry
-from environment_provider_api.backend.environment import release_environment
+from environment_provider.environment import release_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
