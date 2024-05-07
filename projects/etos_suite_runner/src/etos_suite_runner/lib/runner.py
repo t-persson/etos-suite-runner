@@ -20,12 +20,14 @@ from multiprocessing.pool import ThreadPool
 from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
+import opentelemetry
 
 from .exceptions import EnvironmentProviderException
+from .otel_tracing import get_current_context, OpenTelemetryBase
 from .suite import TestSuite
 
 
-class SuiteRunner:  # pylint:disable=too-few-public-methods
+class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
     """Test suite runner.
 
     Splits test suites into sub suites based on number of products available.
@@ -44,6 +46,8 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
         """
         self.params = params
         self.etos = etos
+        self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
+        self.otel_suite_context = get_current_context()
 
     def _release_environment(self):
         """Release an environment from the environment provider."""
@@ -51,23 +55,32 @@ class SuiteRunner:  # pylint:disable=too-few-public-methods
         # Passing variables as keyword argument to make it easier to transition to a function where
         # jsontas is not required.
         jsontas = JsonTas()
-        status, message = release_full_environment(
-            etos=self.etos, jsontas=jsontas, suite_id=self.params.tercc.meta.event_id
-        )
-        if not status:
-            self.logger.error(message)
+        span_name = "release_full_environment"
+        with self.otel_tracer.start_as_current_span(
+            span_name,
+            context=self.otel_suite_context,
+            kind=opentelemetry.trace.SpanKind.CLIENT,
+        ):
+            status, message = release_full_environment(
+                etos=self.etos, jsontas=jsontas, suite_id=self.params.tercc.meta.event_id
+            )
+            if not status:
+                self.logger.error(message)
 
     def start_suites_and_wait(self):
         """Get environments and start all test suites."""
         try:
             test_suites = [
-                TestSuite(self.etos, self.params, suite) for suite in self.params.test_suite
+                TestSuite(self.etos, self.params, suite, otel_context=self.otel_suite_context)
+                for suite in self.params.test_suite
             ]
             with ThreadPool() as pool:
                 pool.map(self.run, test_suites)
             status = self.params.get_status()
             if status.get("error") is not None:
-                raise EnvironmentProviderException(status["error"], self.etos.config.get("task_id"))
+                exc = EnvironmentProviderException(status["error"], self.etos.config.get("task_id"))
+                self._record_exception(exc)
+                raise exc
         finally:
             self.logger.info("Release the full test environment.")
             self._release_environment()
