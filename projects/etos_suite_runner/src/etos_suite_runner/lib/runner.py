@@ -21,6 +21,7 @@ from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
 import opentelemetry
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from .exceptions import EnvironmentProviderException
 from .otel_tracing import get_current_context, OpenTelemetryBase
@@ -70,8 +71,10 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
     def start_suites_and_wait(self):
         """Get environments and start all test suites."""
         try:
+            otel_context_carrier = {}
+            TraceContextTextMapPropagator().inject(otel_context_carrier)
             test_suites = [
-                TestSuite(self.etos, self.params, suite, otel_context=self.otel_suite_context)
+                TestSuite(self.etos, self.params, suite, otel_context_carrier=otel_context_carrier)
                 for suite in self.params.test_suite
             ]
             with ThreadPool() as pool:

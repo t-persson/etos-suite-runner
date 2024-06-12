@@ -29,6 +29,7 @@ from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
 import opentelemetry
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from .lib.esr_parameters import ESRParameters
 from .lib.exceptions import EnvironmentProviderException
@@ -52,6 +53,8 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         """Initialize ESR by creating a rabbitmq publisher."""
         self.logger = logging.getLogger("ESR")
         self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
+        self.otel_context = get_current_context()
+        self.otel_context_token = opentelemetry.context.attach(self.otel_context)
         self.etos = ETOS("ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner")
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
@@ -64,21 +67,24 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
 
-    def _request_environment(self, ids: list[str]) -> None:
+    def __del__(self):
+        """Destructor."""
+        if self.otel_context_token is not None:
+            opentelemetry.context.detach(self.otel_context_token)
+
+    def __request_environment(self, ids: list[str]) -> None:
         """Request an environment from the environment provider.
 
         :param ids: Generated suite runner IDs used to correlate environments and the suite
                     runners.
         """
         span_name = "request_environment"
-        suite_context = get_current_context()
         with self.otel_tracer.start_as_current_span(
             span_name,
-            context=suite_context,
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ):
             try:
-                provider = EnvironmentProvider(self.params.tercc.meta.event_id, ids, copy=False)
+                provider = EnvironmentProvider(self.params.tercc.meta.event_id, ids)
                 result = provider.run()
             except Exception as exc:
                 self.params.set_status("FAILURE", "Failed to run environment provider")
@@ -103,6 +109,23 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                     extra={"user_log": True},
                 )
 
+    def _request_environment(self, ids: list[str], otel_context_carrier: dict) -> None:
+        """Request an environment from the environment provider (OpenTelemetry wrapper).
+
+        :param ids: Generated suite runner IDs used to correlate environments and the suite
+                    runners.
+        :param otel_context_carrier: a dict carrying current OpenTelemetry context.
+        """
+        # OpenTelemetry contexts aren't propagated to threads automatically.
+        # For this reason otel_context needs to be reinstantiated due to
+        # this method running in a separate thread.
+        otel_context = TraceContextTextMapPropagator().extract(carrier=otel_context_carrier)
+        otel_context_token = opentelemetry.context.attach(otel_context)
+        try:
+            self.__request_environment(ids)
+        finally:
+            opentelemetry.context.detach(otel_context_token)
+
     def _release_environment(self) -> None:
         """Release an environment from the environment provider."""
         # TODO: We should remove jsontas as a requirement for this function.
@@ -110,10 +133,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         # jsontas is not required.
         jsontas = JsonTas()
         span_name = "release_full_environment"
-        suite_context = get_current_context()
         with self.otel_tracer.start_as_current_span(
             span_name,
-            context=suite_context,
+            context=self.otel_context,
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ):
             status, message = release_full_environment(
@@ -144,8 +166,15 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         self.logger.info("Number of test suites to run: %d", len(ids), extra={"user_log": True})
         try:
             self.logger.info("Get test environment.")
+            carrier = {}
+            TraceContextTextMapPropagator().inject(carrier)
             threading.Thread(
-                target=self._request_environment, args=(ids.copy(),), daemon=True
+                target=self._request_environment,
+                args=(
+                    ids.copy(),
+                    carrier,
+                ),
+                daemon=True,
             ).start()
 
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
