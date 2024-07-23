@@ -55,35 +55,32 @@ class ESRParameters:
         with self.lock:
             return self.environment_status.copy()
 
+    def _get_id(
+        self, config_key: str, environment_variable: str, eiffel_event: dict[str, dict]
+    ) -> str:
+        """Get ID will return an ID either from an environment variable or an eiffel event."""
+        if self.etos.config.get(config_key) is None:
+            if os.getenv(environment_variable) is not None:
+                self.etos.config.set(config_key, os.getenv(environment_variable, "Unknown"))
+            else:
+                self.etos.config.set(config_key, eiffel_event["meta"]["id"])
+        _id = self.etos.config.get(config_key)
+        if _id is None:
+            raise TypeError(
+                f"{config_key} is not set, neither in Eiffel nor {environment_variable} "
+                "environment variable"
+            )
+        return _id
+
     @property
     def testrun_id(self) -> str:
         """Testrun ID returns the ID of a testrun, either from a TERCC or environment."""
-        if self.etos.config.get("testrun_id") is None:
-            if os.getenv("IDENTIFIER") is not None:
-                self.etos.config.set("testrun_id", os.getenv("IDENTIFIER", "Unknown"))
-            else:
-                self.etos.config.set("testrun_id", self.tercc["meta"]["id"])
-        testrun_id = self.etos.config.get("testrun_id")
-        if testrun_id is None:
-            raise TypeError(
-                "Testrun ID is not set, neither in TERCC nor IDENTIFIER environment variables"
-            )
-        return testrun_id
+        return self._get_id("testrun_id", "IDENTIFIER", self.tercc)
 
     @property
     def iut_id(self) -> str:
         """Iut ID returns the ID of the artifact that is under test."""
-        if self.etos.config.get("iut_id") is None:
-            if os.getenv("ARTIFACT") is not None:
-                self.etos.config.set("iut_id", os.getenv("ARTIFACT", "Unknown"))
-            else:
-                self.etos.config.set("iut_id", self.artifact_created["meta"]["id"])
-        testrun_id = self.etos.config.get("iut_id")
-        if testrun_id is None:
-            raise TypeError(
-                "IUT ID is not set, neither in Eiffel nor ARTIFACT environment variable"
-            )
-        return testrun_id
+        return self._get_id("iut_id", "ARTIFACT", self.artifact_created)
 
     @property
     def artifact_created(self) -> dict:
