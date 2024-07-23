@@ -19,7 +19,6 @@ import logging
 import os
 import signal
 import threading
-import traceback
 from uuid import uuid4
 
 from eiffellib.events import EiffelActivityTriggeredEvent
@@ -139,7 +138,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ):
             status, message = release_full_environment(
-                etos=self.etos, jsontas=jsontas, suite_id=self.params.testrun_id,
+                etos=self.etos,
+                jsontas=jsontas,
+                suite_id=self.params.testrun_id,
             )
             if not status:
                 self.logger.error(message)

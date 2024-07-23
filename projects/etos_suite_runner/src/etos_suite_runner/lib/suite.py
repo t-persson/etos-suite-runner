@@ -458,9 +458,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         if self.empty:
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"
-            description = (
-                f"No tests in test suite {self.params.testrun_id}, aborting test run"
-            )
+            description = f"No tests in test suite {self.params.testrun_id}, aborting test run"
         elif not self.started:
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"

@@ -21,6 +21,7 @@ from threading import Lock
 from typing import Union
 
 from etos_lib import ETOS
+from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from packageurl import PackageURL
 
 from .graphql import request_artifact_created
@@ -61,11 +62,12 @@ class ESRParameters:
             if os.getenv("IDENTIFIER") is not None:
                 self.etos.config.set("testrun_id", os.getenv("IDENTIFIER", "Unknown"))
             else:
-                self.etos.config.set("testrun_id", self.tercc.meta.event_id)
+                self.etos.config.set("testrun_id", self.tercc["meta"]["id"])
         testrun_id = self.etos.config.get("testrun_id")
         if testrun_id is None:
-            raise TypeError("Testrun ID is not set, neither in TERCC nor IDENTIFIER "
-                            "environment variables")
+            raise TypeError(
+                "Testrun ID is not set, neither in TERCC nor IDENTIFIER environment variables"
+            )
         return testrun_id
 
     @property
@@ -78,8 +80,9 @@ class ESRParameters:
                 self.etos.config.set("iut_id", self.artifact_created["meta"]["id"])
         testrun_id = self.etos.config.get("iut_id")
         if testrun_id is None:
-            raise TypeError("IUT ID is not set, neither in Eiffel nor ARTIFACT environment "
-                            "variable")
+            raise TypeError(
+                "IUT ID is not set, neither in Eiffel nor ARTIFACT environment variable"
+            )
         return testrun_id
 
     @property
@@ -89,7 +92,11 @@ class ESRParameters:
         :return: Artifact created event.
         """
         if self.etos.config.get("artifact_created") is None:
-            artifact_created = request_artifact_created(self.etos, self.tercc)
+            # If this method is called, we can be relatively sure that we are running
+            # outside of the ETOS testrun controller.
+            tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
+            tercc.rebuild(self.tercc)
+            artifact_created = request_artifact_created(self.etos, tercc)
             self.etos.config.set("artifact_created", artifact_created)
         return self.etos.config.get("artifact_created")
 
@@ -123,7 +130,7 @@ class ESRParameters:
             raise ValueError("Only one of 'batches' or 'batchesUri' shall be set")
         if batch is not None:
             return batch
-        elif batch_uri is not None:
+        if batch_uri is not None:
             json_header = {"Accept": "application/json"}
             response = self.etos.http.get(
                 batch_uri,
@@ -131,8 +138,7 @@ class ESRParameters:
             )
             response.raise_for_status()
             return response.json()
-        else:
-            raise ValueError("At least one of 'batches' or 'batchesUri' shall be set")
+        raise ValueError("At least one of 'batches' or 'batchesUri' shall be set")
 
     @property
     def product(self) -> str:
