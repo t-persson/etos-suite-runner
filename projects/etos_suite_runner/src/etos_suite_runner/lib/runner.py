@@ -63,7 +63,7 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ):
             status, message = release_full_environment(
-                etos=self.etos, jsontas=jsontas, suite_id=self.params.tercc.meta.event_id
+                etos=self.etos, jsontas=jsontas, suite_id=self.params.testrun_id
             )
             if not status:
                 self.logger.error(message)
@@ -94,7 +94,7 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
         :param test_suite: Test suite to run.
         :type test_suite: :obj:`TestSuite`
         """
-        FORMAT_CONFIG.identifier = self.params.tercc.meta.event_id
+        FORMAT_CONFIG.identifier = self.params.testrun_id
         try:
             test_suite.start()  # send EiffelTestSuiteStartedEvent
             # All sub suites finished.

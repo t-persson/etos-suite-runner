@@ -318,19 +318,6 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         response.raise_for_status()
         return response.json()
 
-    def _announce(self, header: str, body: str) -> None:
-        """Send an announcement over Eiffel.
-
-        :param header: Header of the announcement.
-        :param body: Body of the announcement.
-        """
-        self.etos.events.send_announcement_published(
-            f"[ESR] {header}",
-            body,
-            "MINOR",
-            {"CONTEXT": self.etos.config.get("context")},
-        )
-
     def _send_test_suite_started(self) -> EiffelTestSuiteStartedEvent:
         """Send a test suite started event.
 
@@ -351,14 +338,12 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         }
         links = {
             "CONTEXT": self.etos.config.get("context"),
-            "TERC": self.params.tercc.meta.event_id,
+            "TERC": self.params.testrun_id,
         }
         return self.etos.events.send(test_suite_started, links, data)
 
     def _start(self):
         """Send test suite started, trigger and wait for all sub suites to start."""
-        self._announce("Starting tests", f"Starting up sub suites for '{self.suite.get('name')}'")
-
         self.test_suite_started = self._send_test_suite_started()
         self.logger.info("Test suite started %r", self.test_suite_started.meta.event_id)
         if len(self.suite.get("recipes")) == 0:
@@ -391,7 +376,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                 self.sub_suites.append(sub_suite)
                 thread = threading.Thread(
                     target=sub_suite.start,
-                    args=(self.params.tercc.meta.event_id, self.otel_context_carrier),
+                    args=(self.params.testrun_id, self.otel_context_carrier),
                 )
                 threads.append(thread)
                 thread.start()
@@ -439,7 +424,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         self.logger.info("Releasing all sub suite environments")
         for sub_suite in self.sub_suites:
             if not sub_suite.released:
-                sub_suite.release(self.params.tercc.meta.event_id)
+                sub_suite.release(self.params.testrun_id)
         self.logger.info("All sub suite environments are released")
 
     def finish(self, verdict: str, conclusion: str, description: str) -> None:
@@ -474,7 +459,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
             verdict = "INCONCLUSIVE"
             conclusion = "FAILED"
             description = (
-                f"No tests in test suite {self.params.tercc.meta.event_id}, aborting test run"
+                f"No tests in test suite {self.params.testrun_id}, aborting test run"
             )
         elif not self.started:
             verdict = "INCONCLUSIVE"
