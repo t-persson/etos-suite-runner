@@ -91,7 +91,7 @@ class ESRParameters:
             # If this method is called, we can be relatively sure that we are running
             # outside of the ETOS testrun controller.
             tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
-            tercc.rebuild(self.tercc)
+            tercc.rebuild(self.tercc())
             artifact_created = request_artifact_created(self.etos, tercc)
             self.etos.config.set("artifact_created", artifact_created)
         return self.etos.config.get("artifact_created")
@@ -111,10 +111,10 @@ class ESRParameters:
         """Download and return test batches."""
         with self.lock:
             if self.__test_suite is None:
-                if isinstance(self.tercc, dict):
-                    self.__test_suite = self._eiffel_test_suite(self.tercc)
+                if isinstance(self.tercc(), dict):
+                    self.__test_suite = self._eiffel_test_suite(self.tercc())
                 else:
-                    self.__test_suite = self.tercc
+                    self.__test_suite = self.tercc()
         return self.__test_suite if self.__test_suite else []
 
     def _eiffel_test_suite(self, tercc: dict) -> list[dict]:
