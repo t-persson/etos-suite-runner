@@ -156,9 +156,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
         self.logger.info("Sending ESR Docker environment event.")
-        self.etos.events.send_environment_defined(
-            "ESR Docker", {"CONTEXT": context}, image=os.getenv("SUITE_RUNNER")
-        )
+        # self.etos.events.send_environment_defined(
+        #     "ESR Docker", {"CONTEXT": context}, image=os.getenv("SUITE_RUNNER")
+        # )
         runner = SuiteRunner(self.params, self.etos)
         ids = []
         for suite in self.params.test_suite:
@@ -192,7 +192,7 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
     @staticmethod
     def verify_input() -> None:
         """Verify that the data input to ESR are correct."""
-        assert os.getenv("SUITE_RUNNER"), "SUITE_RUNNER enviroment variable not provided."
+        # assert os.getenv("SUITE_RUNNER"), "SUITE_RUNNER enviroment variable not provided."
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 
