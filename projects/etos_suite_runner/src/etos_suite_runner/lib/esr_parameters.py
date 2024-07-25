@@ -18,7 +18,7 @@ import json
 import logging
 import os
 from threading import Lock
-from typing import Union
+from typing import Union, Callable
 
 from etos_lib import ETOS
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
@@ -56,14 +56,14 @@ class ESRParameters:
             return self.environment_status.copy()
 
     def _get_id(
-        self, config_key: str, environment_variable: str, eiffel_event: dict[str, dict]
+        self, config_key: str, environment_variable: str, eiffel_event: Callable
     ) -> str:
         """Get ID will return an ID either from an environment variable or an eiffel event."""
         if self.etos.config.get(config_key) is None:
             if os.getenv(environment_variable) is not None:
                 self.etos.config.set(config_key, os.getenv(environment_variable, "Unknown"))
             else:
-                self.etos.config.set(config_key, eiffel_event["meta"]["id"])
+                self.etos.config.set(config_key, eiffel_event()["meta"]["id"])
         _id = self.etos.config.get(config_key)
         if _id is None:
             raise TypeError(
@@ -82,7 +82,6 @@ class ESRParameters:
         """Iut ID returns the ID of the artifact that is under test."""
         return self._get_id("iut_id", "ARTIFACT", self.artifact_created)
 
-    @property
     def artifact_created(self) -> dict:
         """Artifact under test.
 
@@ -97,7 +96,6 @@ class ESRParameters:
             self.etos.config.set("artifact_created", artifact_created)
         return self.etos.config.get("artifact_created")
 
-    @property
     def tercc(self) -> Union[list[dict], dict]:
         """Test execution recipe collection created event from environment.
 
