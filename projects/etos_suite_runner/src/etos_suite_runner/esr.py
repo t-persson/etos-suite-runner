@@ -162,8 +162,8 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         runner = SuiteRunner(self.params, self.etos)
         ids = []
         for suite in self.params.test_suite:
-            suite["test_suite_started_id"] = str(uuid4())
-            ids.append(suite["test_suite_started_id"])
+            suite.test_suite_started_id = str(uuid4())
+            ids.append(suite.test_suite_started_id)
         self.logger.info("Number of test suites to run: %d", len(ids), extra={"user_log": True})
         try:
             self.logger.info("Get test environment.")

@@ -25,6 +25,7 @@ from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from packageurl import PackageURL
 
 from .graphql import request_artifact_created
+from .testrun import Suite
 
 
 class ESRParameters:
@@ -56,14 +57,14 @@ class ESRParameters:
             return self.environment_status.copy()
 
     def _get_id(
-        self, config_key: str, environment_variable: str, eiffel_event: Callable
+        self, config_key: str, environment_variable: str, eiffel_event: Union[list[dict], dict]
     ) -> str:
         """Get ID will return an ID either from an environment variable or an eiffel event."""
         if self.etos.config.get(config_key) is None:
             if os.getenv(environment_variable) is not None:
                 self.etos.config.set(config_key, os.getenv(environment_variable, "Unknown"))
             else:
-                self.etos.config.set(config_key, eiffel_event()["meta"]["id"])
+                self.etos.config.set(config_key, eiffel_event["meta"]["id"])
         _id = self.etos.config.get(config_key)
         if _id is None:
             raise TypeError(
@@ -82,20 +83,23 @@ class ESRParameters:
         """Iut ID returns the ID of the artifact that is under test."""
         return self._get_id("iut_id", "ARTIFACT", self.artifact_created)
 
+    @property
     def artifact_created(self) -> dict:
         """Artifact under test.
 
         :return: Artifact created event.
         """
         if self.etos.config.get("artifact_created") is None:
-            # If this method is called, we can be relatively sure that we are running
-            # outside of the ETOS testrun controller.
-            tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
-            tercc.rebuild(self.tercc())
-            artifact_created = request_artifact_created(self.etos, tercc)
+            if os.getenv("ARTIFACT") is not None:
+                artifact_created = request_artifact_created(self.etos, artifact_id=os.getenv("ARTIFACT"))
+            else:
+                tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
+                tercc.rebuild(self.tercc)
+                artifact_created = request_artifact_created(self.etos, tercc=tercc)
             self.etos.config.set("artifact_created", artifact_created)
         return self.etos.config.get("artifact_created")
 
+    @property
     def tercc(self) -> Union[list[dict], dict]:
         """Test execution recipe collection created event from environment.
 
@@ -107,15 +111,17 @@ class ESRParameters:
         return self.etos.config.get("tercc")
 
     @property
-    def test_suite(self) -> list[dict]:
+    def test_suite(self) -> list[Suite]:
         """Download and return test batches."""
         with self.lock:
             if self.__test_suite is None:
-                if isinstance(self.tercc(), dict):
-                    self.__test_suite = self._eiffel_test_suite(self.tercc())
+                tercc = json.loads(os.getenv("TERCC", "{}"))
+                if isinstance(tercc, list):
+                    self.__test_suite = [Suite(**suite) for suite in tercc]
                 else:
-                    self.__test_suite = self.tercc()
-        return self.__test_suite if self.__test_suite else []
+                    test_suite = self._eiffel_test_suite(tercc)
+                    self.__test_suite = [Suite.from_tercc(suite) for suite in test_suite]
+        return self.__test_suite or []
 
     def _eiffel_test_suite(self, tercc: dict) -> list[dict]:
         """Eiffel test suite parses an Eiffel TERCC even and returns a list of test suites."""

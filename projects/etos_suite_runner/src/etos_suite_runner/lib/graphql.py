@@ -37,18 +37,26 @@ def request(etos, query):
     wait_generator = etos.utils.wait(etos.graphql.execute, query=query)
     yield from wait_generator
 
-
-def request_artifact_created(etos, tercc):
+def request_artifact_created(etos, tercc=None, artifact_id=None):
     """Fetch artifact created events from GraphQL.
 
     :param etos: ETOS client instance.
     :type etos: :obj:`etos_lib.etos.Etos`
     :param tercc: The TERCC to get artifact created from.
     :type tercc: dict
+    :param artifact_id: The ID of the artifact created.
+    :type artifact_id: str
     :return: Artifact created event.
     :rtype: :obj:`EiffelArtifactCreatedEvent`
     """
-    for response in request(etos, ARTIFACTS % etos.utils.eiffel_link(tercc, "CAUSE")):
+    if tercc is None and artifact_id is None:
+        raise Exception("At least one of 'tercc' and 'artifact_id' must be provided")
+    if tercc:
+        query = ARTIFACTS % etos.utils.eiffel_link(tercc, "CAUSE")
+    else:
+        query = ARTIFACTS % artifact_id
+
+    for response in request(etos, query):
         try:
             created_node = next(etos.utils.search(response, "node"))[1]
         except StopIteration:
