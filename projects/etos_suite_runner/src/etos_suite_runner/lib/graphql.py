@@ -37,6 +37,7 @@ def request(etos, query):
     wait_generator = etos.utils.wait(etos.graphql.execute, query=query)
     yield from wait_generator
 
+
 def request_artifact_created(etos, tercc=None, artifact_id=None):
     """Fetch artifact created events from GraphQL.
 
@@ -50,7 +51,7 @@ def request_artifact_created(etos, tercc=None, artifact_id=None):
     :rtype: :obj:`EiffelArtifactCreatedEvent`
     """
     if tercc is None and artifact_id is None:
-        raise Exception("At least one of 'tercc' and 'artifact_id' must be provided")
+        raise TypeError("At least one of 'tercc' and 'artifact_id' must be provided")
     if tercc:
         query = ARTIFACTS % etos.utils.eiffel_link(tercc, "CAUSE")
     else:

@@ -19,6 +19,7 @@ from multiprocessing.pool import ThreadPool
 
 from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
+from etos_lib.kubernetes.schemas.testrun import Suite
 from jsontas.jsontas import JsonTas
 import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -68,14 +69,18 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
             if not status:
                 self.logger.error(message)
 
-    def start_suites_and_wait(self):
+    def start_suites_and_wait(self, suites: list[tuple[str, Suite]]):
         """Get environments and start all test suites."""
         try:
             otel_context_carrier = {}
             TraceContextTextMapPropagator().inject(otel_context_carrier)
+            # test_suites = [
+            #     TestSuite(self.etos, self.params, suite, otel_context_carrier=otel_context_carrier)
+            #     for suite in self.params.test_suite
+            # ]
             test_suites = [
-                TestSuite(self.etos, self.params, suite, otel_context_carrier=otel_context_carrier)
-                for suite in self.params.test_suite
+                TestSuite(self.etos, self.params, suite, id, otel_context_carrier=otel_context_carrier)
+                for id, suite in suites
             ]
             with ThreadPool() as pool:
                 pool.map(self.run, test_suites)

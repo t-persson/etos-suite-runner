@@ -31,7 +31,7 @@ import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from .esr_parameters import ESRParameters
-from .testrun import Suite
+from etos_lib.kubernetes.schemas.testrun import Suite
 from .exceptions import EnvironmentProviderException
 from .executor import Executor, TestStartException
 from .graphql import (
@@ -203,12 +203,14 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         etos: ETOS,
         params: ESRParameters,
         suite: Suite,
+        id: str,
         otel_context_carrier: Union[dict, None] = None,
     ) -> None:
         """Initialize a TestSuite instance."""
         self.etos = etos
         self.params = params
         self.suite = suite
+        self.test_suite_started_id = id
         self.logger = logging.getLogger(f"TestSuite - {self.suite.name}")
         self.logger.addFilter(DuplicateFilter(self.logger))
         self.sub_suites = []
@@ -242,7 +244,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         while time.time() < timeout:
             time.sleep(5)
             activity_triggered = self.__environment_activity_triggered(
-                self.suite.test_suite_started_id
+                self.test_suite_started_id
             )
             if activity_triggered is None:
                 status = self.params.get_status()
@@ -331,7 +333,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
             categories.append(self.params.product)
 
         # This ID has been stored in Environment so that the ETR know which test suite to link to.
-        test_suite_started.meta.event_id = self.suite.test_suite_started_id
+        test_suite_started.meta.event_id = self.test_suite_started_id
         data = {
             "name": self.suite.name,
             "categories": categories,
@@ -372,7 +374,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                     )
                 sub_suite_definition["id"] = sub_suite_environment["meta"]["id"]
                 sub_suite = SubSuite(
-                    self.etos, sub_suite_definition, self.suite.test_suite_started_id
+                    self.etos, sub_suite_definition, self.test_suite_started_id
                 )
                 self.sub_suites.append(sub_suite)
                 thread = threading.Thread(

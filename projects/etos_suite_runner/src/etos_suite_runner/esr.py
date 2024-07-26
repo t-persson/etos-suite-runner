@@ -26,6 +26,7 @@ from environment_provider.environment_provider import EnvironmentProvider
 from environment_provider.environment import release_full_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
+from etos_lib.kubernetes.schemas.testrun import Suite
 from jsontas.jsontas import JsonTas
 import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -151,20 +152,17 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         Will only start the test activity if there's a 'slot' available.
 
         :param triggered: Activity triggered.
-        :return: List of main suite IDs
+        :return: List of main suite IDs - Used for tests
         """
         context = triggered.meta.event_id
         self.etos.config.set("context", context)
         self.logger.info("Sending ESR Docker environment event.")
-        # self.etos.events.send_environment_defined(
-        #     "ESR Docker", {"CONTEXT": context}, image=os.getenv("SUITE_RUNNER")
-        # )
         runner = SuiteRunner(self.params, self.etos)
-        ids = []
+        suites: list[tuple[str, Suite]] = []
         for suite in self.params.test_suite:
-            suite.test_suite_started_id = str(uuid4())
-            ids.append(suite.test_suite_started_id)
-        self.logger.info("Number of test suites to run: %d", len(ids), extra={"user_log": True})
+            test_suite_started_id = str(uuid4())
+            suites.append((test_suite_started_id, suite))
+        self.logger.info("Number of test suites to run: %d", len(suites), extra={"user_log": True})
         try:
             self.logger.info("Get test environment.")
             carrier = {}
@@ -172,7 +170,7 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             threading.Thread(
                 target=self._request_environment,
                 args=(
-                    ids.copy(),
+                    [id for id, _ in suites.copy()],
                     carrier,
                 ),
                 daemon=True,
@@ -181,8 +179,8 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
 
             self.logger.info("Starting ESR.")
-            runner.start_suites_and_wait()
-            return ids
+            runner.start_suites_and_wait(suites)
+            return [id for id, _ in suites]
         except EnvironmentProviderException as exc:
             self.logger.info("Release test environment.")
             self._release_environment()
@@ -192,7 +190,6 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
     @staticmethod
     def verify_input() -> None:
         """Verify that the data input to ESR are correct."""
-        # assert os.getenv("SUITE_RUNNER"), "SUITE_RUNNER enviroment variable not provided."
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
 

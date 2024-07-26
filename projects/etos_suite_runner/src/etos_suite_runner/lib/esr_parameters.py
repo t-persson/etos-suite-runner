@@ -18,14 +18,14 @@ import json
 import logging
 import os
 from threading import Lock
-from typing import Union, Callable
+from typing import Union
 
 from etos_lib import ETOS
+from etos_lib.kubernetes.schemas.testrun import Suite
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from packageurl import PackageURL
 
 from .graphql import request_artifact_created
-from .testrun import Suite
 
 
 class ESRParameters:
@@ -91,7 +91,9 @@ class ESRParameters:
         """
         if self.etos.config.get("artifact_created") is None:
             if os.getenv("ARTIFACT") is not None:
-                artifact_created = request_artifact_created(self.etos, artifact_id=os.getenv("ARTIFACT"))
+                artifact_created = request_artifact_created(
+                    self.etos, artifact_id=os.getenv("ARTIFACT")
+                )
             else:
                 tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
                 tercc.rebuild(self.tercc)
