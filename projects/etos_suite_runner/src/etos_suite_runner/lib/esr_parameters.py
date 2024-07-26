@@ -122,7 +122,8 @@ class ESRParameters:
                     self.__test_suite = [Suite(**suite) for suite in tercc]
                 else:
                     test_suite = self._eiffel_test_suite(tercc)
-                    self.__test_suite = [Suite.from_tercc(suite) for suite in test_suite]
+                    # The dataset is not necessary for the suite runner.
+                    self.__test_suite = [Suite.from_tercc(suite, {}) for suite in test_suite]
         return self.__test_suite or []
 
     def _eiffel_test_suite(self, tercc: dict) -> list[dict]:
