@@ -33,7 +33,7 @@ from .log_subscriber import LogSubscriber
 class Listener(threading.Thread):
     """Listen to log messages from ETOS executions."""
 
-    __tercc = None
+    __identifier = None
     __stop = False
     rabbitmq = None
     logger = logging.getLogger(__name__)
@@ -41,7 +41,6 @@ class Listener(threading.Thread):
     def __init__(self, lock: threading.Lock, log_file: pathlib.Path, event_file: pathlib.Path):
         """Initialize ETOS library."""
         super().__init__()
-        self.identifier = self.tercc.meta.event_id
         self.lock = lock
         self.log_file = log_file
         self.event_file = event_file
@@ -50,13 +49,21 @@ class Listener(threading.Thread):
                 self.id = len(_event_file.readlines()) + 1
 
     @property
+    def identifier(self) -> str:
+        """Get ETOS identifier from environment."""
+        if self.__identifier is None:
+            if os.getenv("IDENTIFIER") is not None:
+                self.__identifier = os.getenv("IDENTIFIER", "Unknown")
+            else:
+                self.__identifier = self.tercc.meta.event_id
+        return self.__identifier
+
+    @property
     def tercc(self) -> EiffelTestExecutionRecipeCollectionCreatedEvent:
         """Test execution recipe collection created event from environment."""
-        if self.__tercc is None:
-            tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
-            tercc.rebuild(json.loads(os.getenv("TERCC")))
-            self.__tercc = tercc
-        return self.__tercc
+        tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
+        tercc.rebuild(json.loads(os.getenv("TERCC")))
+        return tercc
 
     def new_event(self, event: dict, _: Optional[str] = None) -> None:
         """Get a new event from the internal RabbitMQ bus and write it to file."""
