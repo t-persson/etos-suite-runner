@@ -121,3 +121,18 @@ ARTIFACTS = """
   }
 }
 """
+
+
+TERCC = """
+{
+  testExecutionRecipeCollectionCreated(search: "{'meta.id': '%s'}") {
+    edges {
+      node {
+        meta {
+          id
+        }
+      }
+    }
+  }
+}
+"""

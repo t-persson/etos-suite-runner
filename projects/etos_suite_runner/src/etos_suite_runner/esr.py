@@ -21,7 +21,9 @@ import signal
 import threading
 from uuid import uuid4
 
-from eiffellib.events import EiffelActivityTriggeredEvent
+from eiffellib.events import (
+    EiffelActivityTriggeredEvent, EiffelTestExecutionRecipeCollectionCreatedEvent,
+)
 from environment_provider.environment_provider import EnvironmentProvider
 from environment_provider.environment import release_full_environment
 from etos_lib import ETOS
@@ -33,6 +35,7 @@ from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapProp
 
 from .lib.esr_parameters import ESRParameters
 from .lib.exceptions import EnvironmentProviderException
+from .lib.graphql import request_tercc
 from .lib.runner import SuiteRunner
 from .lib.otel_tracing import get_current_context, OpenTelemetryBase
 
@@ -187,11 +190,26 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             self._record_exception(exc)
             raise exc
 
+    def run_suites_in_controller(self):
+        pass
+
     @staticmethod
     def verify_input() -> None:
         """Verify that the data input to ESR are correct."""
         assert os.getenv("SOURCE_HOST"), "SOURCE_HOST environment variable not provided."
         assert os.getenv("TERCC"), "TERCC environment variable not provided."
+
+    def _send_tercc(self, testrun_id: str, iut_id: str) -> None:
+        """Send tercc will publish the TERCC event for this testrun."""
+        self.logger.info("Sending TERCC event")
+        event = EiffelTestExecutionRecipeCollectionCreatedEvent()
+        event.meta.event_id = testrun_id
+        links = {"CAUSE": iut_id}
+        data = {
+            "selectionStrategy": {"tracker": "Suite Builder", "id": str(uuid4())},
+            "batchesUri": os.getenv("SUITE_SOURCE", "Unknown"),
+        }
+        self.etos.events.send(event, links, data)
 
     def run(self) -> list[str]:
         """Run the ESR main loop.
@@ -202,7 +220,11 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         try:
             testrun_id = self.params.testrun_id
             self.logger.info("ETOS suite runner is starting up", extra={"user_log": True})
-
+            if os.getenv("IDENTIFIER") is not None:
+                # We are probably running as a TestRun
+                if request_tercc(self.etos, testrun_id) is None:
+                    self._send_tercc(testrun_id, self.params.iut_id)
+ 
             activity_name = "ETOS testrun"
             links = {
                 "CAUSE": [
