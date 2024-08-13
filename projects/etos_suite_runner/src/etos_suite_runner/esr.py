@@ -18,6 +18,7 @@
 import logging
 import os
 import signal
+import time
 import threading
 from uuid import uuid4
 
@@ -75,6 +76,52 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         if self.otel_context_token is not None:
             opentelemetry.context.detach(self.otel_context_token)
 
+    def __environment_request_status(self) -> None:
+        """Continuosly check environment request status."""
+        timeout = time.time() + self.etos.config.get("WAIT_FOR_ENVIRONMENT_TIMEOUT")
+        span_name = "environment_request"
+        with self.otel_tracer.start_as_current_span(
+            span_name,
+            kind=opentelemetry.trace.SpanKind.CLIENT,
+        ):
+            while time.time() <= timeout:
+                time.sleep(5)
+                failed = []
+                success = []
+                requests = []
+                found = False
+                for request in self.params.environment_requests:
+                    requests.append(request)
+                    # This condition check is temporary to make sure that the ESR fails if environment
+                    # requests fail. In the future the ESR shall not even start if the environment request
+                    # does not finish.
+                    for condition in request.status.conditions:
+                        _type = condition.get("type", "").lower()
+                        if _type == "ready":
+                            found = True
+                            status = condition.get("status", "").lower()
+                            reason = condition.get("reason", "").lower()
+                            if status == "false" and reason == "failed":
+                                failed.append(condition)
+                            if status == "false" and reason == "done":
+                                success.append(condition)
+                if found and len(failed) > 0:
+                    for request in failed:
+                        self.logger.error(request.get("message"))
+                    self.params.set_status("FAILURE", failed[-1].get("message"))
+                    self.logger.error(
+                        "Environment provider has failed in creating an environment for test.",
+                        extra={"user_log": True},
+                    )
+                    break
+                if found and len(success) == len(requests):
+                    self.params.set_status("SUCCESS", "Successfully created an environment for test")
+                    self.logger.info(
+                        "Environment provider has finished creating an environment for test.",
+                        extra={"user_log": True},
+                    )
+                    break
+
     def __request_environment(self, ids: list[str]) -> None:
         """Request an environment from the environment provider.
 
@@ -87,7 +134,7 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ):
             try:
-                provider = EnvironmentProvider(self.params.testrun_id, ids)
+                provider = EnvironmentProvider(ids)
                 result = provider.run()
             except Exception as exc:
                 self.params.set_status("FAILURE", "Failed to run environment provider")
@@ -125,7 +172,10 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         otel_context = TraceContextTextMapPropagator().extract(carrier=otel_context_carrier)
         otel_context_token = opentelemetry.context.attach(otel_context)
         try:
-            self.__request_environment(ids)
+            if os.getenv("IDENTIFIER") is not None:
+                self.__environment_request_status()
+            else:
+                self.__request_environment(ids)
         finally:
             opentelemetry.context.detach(otel_context_token)
 
@@ -162,9 +212,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         self.logger.info("Sending ESR Docker environment event.")
         runner = SuiteRunner(self.params, self.etos)
         suites: list[tuple[str, Suite]] = []
-        for suite in self.params.test_suite:
-            test_suite_started_id = str(uuid4())
-            suites.append((test_suite_started_id, suite))
+        ids = self.params.main_suite_ids()
+        for i, suite in enumerate(self.params.test_suite):
+            suites.append((ids[i], suite))
         self.logger.info("Number of test suites to run: %d", len(suites), extra={"user_log": True})
         try:
             self.logger.info("Get test environment.")
@@ -189,9 +239,6 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             self._release_environment()
             self._record_exception(exc)
             raise exc
-
-    def run_suites_in_controller(self):
-        pass
 
     @staticmethod
     def verify_input() -> None:

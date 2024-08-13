@@ -17,11 +17,14 @@
 import json
 import logging
 import os
+from uuid import uuid4
 from threading import Lock
 from typing import Union
 
 from etos_lib import ETOS
 from etos_lib.kubernetes.schemas.testrun import Suite
+from etos_lib.kubernetes.schemas.environment import Environment as EnvironmentSchema
+from etos_lib.kubernetes import Kubernetes, Environment
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from packageurl import PackageURL
 
@@ -72,6 +75,38 @@ class ESRParameters:
                 "environment variable"
             )
         return _id
+
+    @property
+    def environments(self) -> list[EnvironmentSchema]:
+        """Environments to run tests in."""
+        environment_client = Environment(Kubernetes(), strict=True)
+        response = environment_client.client.get(
+            namespace=environment_client.namespace,
+            label_selector=f"etos.eiffel-community.github.io/id={self.testrun_id}"
+        )  # type:ignore
+
+        environments = []
+        for environment in response.to_dict().get("items", []):
+            environments.append(EnvironmentSchema.model_validate(environment))
+        return environments
+
+    @property
+    def environment_requests(self) -> list:
+        """Environment requests for a particular testrun."""
+        kubernetes = Kubernetes()
+        environment_requests_client = kubernetes.environment_requests
+        namespace = kubernetes.namespace
+        response = environment_requests_client.get(
+            namespace=namespace,
+            label_selector=f"etos.eiffel-community.github.io/id={self.testrun_id}"
+        )  # type:ignore
+        return response.items
+
+    def main_suite_ids(self) -> list[str]:
+        """Environment requests to the environment provider."""
+        if os.getenv("IDENTIFIER") is None:
+            return [str(uuid4()) for _ in range(len(self.test_suite))]
+        return [request.spec.id for request in self.environment_requests]
 
     @property
     def testrun_id(self) -> str:
