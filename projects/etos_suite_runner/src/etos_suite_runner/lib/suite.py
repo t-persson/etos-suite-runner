@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """Test suite handler."""
+import os
 import json
 import logging
 import threading
@@ -26,6 +27,7 @@ from environment_provider.environment import release_environment
 from etos_lib import ETOS
 from etos_lib.logging.logger import FORMAT_CONFIG
 from etos_lib.opentelemetry.semconv import Attributes as SemConvAttributes
+from etos_lib.kubernetes import Kubernetes, Environment
 from jsontas.jsontas import JsonTas
 import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
@@ -153,14 +155,17 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
         finally:
             opentelemetry.context.detach(otel_context_token)
 
-    def release(self, testrun_id) -> None:
-        """Release this sub suite."""
+    def _delete_environment(self) -> bool:
+        """Delete environment from Kubernetes."""
+        environment_name = self.environment.get("executor", {}).get("id")
+        environment_client = Environment(Kubernetes(), strict=True)
+        return environment_client.delete(environment_name)
+
+    def _release_environment(self, testrun_id: str):
+        """Release environment manually via the environment provider."""
         # TODO: This whole method is now a bit of a hack that needs to be cleaned up.
         # Most cleanup is required in the environment provider so this method will stay until an
         # update has been made there.
-        self.logger.info(
-            "Check in test environment %r", self.environment["id"], extra={"user_log": True}
-        )
         jsontas = JsonTas()
         registry = ProviderRegistry(etos=self.etos, jsontas=jsontas, suite_id=testrun_id)
 
@@ -180,13 +185,28 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
             span.set_attribute(SemConvAttributes.TESTRUN_ID, testrun_id)
             span.set_attribute(SemConvAttributes.ENVIRONMENT, json.dumps(self.environment))
             if failure is not None:
-                self.logger.exception(
-                    "Failed to check in %r", self.environment["id"], extra={"user_log": True}
-                )
                 self._record_exception(failure)
-                return
-            self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
-            self.released = True
+                return False
+        return True
+
+    def release(self, testrun_id) -> None:
+        """Release this sub suite."""
+        self.logger.info(
+            "Check in test environment %r", self.environment["id"], extra={"user_log": True}
+        )
+        # Running as part of ETOS controller
+        if os.getenv("IDENTIFIER") is not None:
+            success = self._delete_environment()
+        else:
+            success = self._release_environment(testrun_id)
+
+        if not success:
+            self.logger.exception(
+                "Failed to check in %r", self.environment["id"], extra={"user_log": True}
+            )
+            return
+        self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
+        self.released = True
 
 
 class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes

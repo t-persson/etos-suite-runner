@@ -235,8 +235,10 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             runner.start_suites_and_wait(suites)
             return [id for id, _ in suites]
         except EnvironmentProviderException as exc:
-            self.logger.info("Release test environment.")
-            self._release_environment()
+            # Not running as part of controller
+            if os.getenv("IDENTIFIER") is None:
+                self.logger.info("Release test environment.")
+                self._release_environment()
             self._record_exception(exc)
             raise exc
 

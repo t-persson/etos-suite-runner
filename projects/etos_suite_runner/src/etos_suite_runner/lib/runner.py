@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """ETOS suite runner executor."""
+import os
 import logging
 from multiprocessing.pool import ThreadPool
 
@@ -86,8 +87,10 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
                 self._record_exception(exc)
                 raise exc
         finally:
-            self.logger.info("Release the full test environment.")
-            self._release_environment()
+            # Not running as part of controller
+            if os.getenv("IDENTIFIER") is None:
+                self.logger.info("Release the full test environment.")
+                self._release_environment()
 
     def run(self, test_suite):
         """Run test suite runner.
