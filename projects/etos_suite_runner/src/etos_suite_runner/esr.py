@@ -53,13 +53,13 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
 
     logger = logging.getLogger(__name__)
 
-    def __init__(self) -> None:
+    def __init__(self, etos: ETOS) -> None:
         """Initialize ESR by creating a rabbitmq publisher."""
         self.logger = logging.getLogger("ESR")
         self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
         self.otel_context = get_current_context()
         self.otel_context_token = opentelemetry.context.attach(self.otel_context)
-        self.etos = ETOS("ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner")
+        self.etos = etos
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
         FORMAT_CONFIG.identifier = self.params.testrun_id
@@ -271,7 +271,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             self.logger.info("ETOS suite runner is starting up", extra={"user_log": True})
             if os.getenv("IDENTIFIER") is not None:
                 # We are probably running as a TestRun
+                self.logger.info("Checking TERCC")
                 if request_tercc(self.etos, testrun_id) is None:
+                    self.logger.info("Sending TERCC")
                     self._send_tercc(testrun_id, self.params.iut_id)
  
             activity_name = "ETOS testrun"
@@ -281,6 +283,7 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                     self.params.iut_id,
                 ]
             }
+            self.logger.info("Sending activity triggered for the ETOS testrun")
             triggered = self.etos.events.send_activity_triggered(
                 activity_name,
                 links,

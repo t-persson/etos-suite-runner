@@ -457,14 +457,18 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         :param conclusion: Conclusion taken on the results.
         :param description: Description of the verdict and conclusion.
         """
+        outcome={
+            "verdict": verdict,
+            "conclusion": conclusion,
+            "description": description,
+        }
+        with self.params.lock:
+            results = self.etos.config.get("results")
+            results.append(outcome)  # type: ignore
         self.etos.events.send_test_suite_finished(
             self.test_suite_started,
             {"CONTEXT": self.etos.config.get("context")},
-            outcome={
-                "verdict": verdict,
-                "conclusion": conclusion,
-                "description": description,
-            },
+            outcome=outcome,
         )
         self.logger.info("Test suite finished.")
 
