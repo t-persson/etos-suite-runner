@@ -46,7 +46,7 @@ class EnvVarContextGetter(Getter):
     def get(self, carrier, key):
         """Get value using the given carrier variable and key."""
         value = os.getenv(carrier)
-        if value is not None:
+        if value is not None and value != "":
             pairs = value.split(",")
             for pair in pairs:
                 k, v = pair.split("=", 1)
