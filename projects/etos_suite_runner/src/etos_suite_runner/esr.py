@@ -18,6 +18,7 @@
 
 import logging
 import os
+import re
 import signal
 import time
 import threading
@@ -158,7 +159,9 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                     "Environment provider has failed in creating an environment for test.",
                     extra={"user_log": True},
                 )
-                exc = Exception(str(result.get("error")))
+                exc = self._parse_environment_exception(
+                    result.get("details", ""), result.get("error", "")
+                )
                 self._record_exception(exc)
             else:
                 self.params.set_status("SUCCESS", result.get("error"))
@@ -166,6 +169,33 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                     "Environment provider has finished creating an environment for test.",
                     extra={"user_log": True},
                 )
+
+    def _parse_environment_exception(self, traceback_str: str, fallback_msg: str) -> Exception:
+        """Parse a traceback string extracting the type and return the corresponding exception.
+
+        This function uses a simple regular expression to parse the
+        traceback string. It may not work correctly for all possible
+        input formats.
+        """
+        try:
+            # format_exc always ends in \n\n so get the traceback string from the correct line.
+            traceback_str = traceback_str.split("\n")[-2]
+        except IndexError:
+            self.logger.warning("Failed to parse exception")
+            return Exception(fallback_msg)
+        match = re.search(r"([a-zA-Z_][\w\.]+)(?:\: (.+))?", traceback_str)
+        if match:
+            exc_type = match.group(1)
+            exc_msg = match.group(2) or ""
+            try:
+                exc_class = globals()[exc_type]
+                return exc_class(exc_msg)
+            except KeyError:
+                self.logger.warning("Unknown exception type: %s", exc_type)
+                return Exception(fallback_msg)
+        else:
+            self.logger.warning("Failed to parse exception")
+            return Exception(fallback_msg)
 
     def _request_environment(self, ids: list[str], otel_context_carrier: dict) -> None:
         """Request an environment from the environment provider (OpenTelemetry wrapper).
