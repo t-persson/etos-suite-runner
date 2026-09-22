@@ -29,6 +29,7 @@ from etos_lib.kubernetes.schemas import Environment as EnvironmentSchema
 from etos_lib.kubernetes.schemas import Suite
 from packageurl import PackageURL
 
+from .exceptions import ArtifactNotFoundException
 from .graphql import request_artifact_created
 
 
@@ -142,10 +143,14 @@ class ESRParameters:
         :return: Artifact created event.
         """
         if self.etos.config.get("artifact_created") is None:
-            if os.getenv("ARTIFACT") is not None:
+            artifact_id = os.getenv("ARTIFACT")
+            if artifact_id is not None:
                 artifact_created = request_artifact_created(
-                    self.etos, artifact_id=os.getenv("ARTIFACT")
+                    self.etos,
+                    artifact_id=artifact_id,
                 )
+                if artifact_created is None:
+                    raise ArtifactNotFoundException(artifact_id)
             else:
                 tercc = EiffelTestExecutionRecipeCollectionCreatedEvent()
                 tercc.rebuild(self.tercc)

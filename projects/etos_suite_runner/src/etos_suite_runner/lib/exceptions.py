@@ -23,3 +23,11 @@ class EnvironmentProviderException(Exception):
         """Initialize with task_id."""
         self.task_id = task_id
         super().__init__(msg)
+
+
+class ArtifactNotFoundException(Exception):
+    """Exception raised when an IUT artifact is not available."""
+
+    def __init__(self, artifact_id: str):
+        """Initialize the exception with the missing artifact ID."""
+        super().__init__(f"ArtifactCreated event for artifact {artifact_id!r} was not found")

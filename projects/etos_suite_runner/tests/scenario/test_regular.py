@@ -22,6 +22,7 @@ import time
 from copy import deepcopy
 from functools import partial
 from unittest import TestCase
+from unittest.mock import patch
 
 from eiffellib.events import (
     EiffelArtifactCreatedEvent,
@@ -32,6 +33,8 @@ from etos_lib.lib.config import Config
 from etos_lib.lib.debug import Debug
 
 from etos_suite_runner.esr import ESR
+from etos_suite_runner.lib.esr_parameters import ESRParameters
+from etos_suite_runner.lib.exceptions import ArtifactNotFoundException
 from tests.library.fake_database import FakeDatabase
 from tests.library.fake_server import FakeServer
 from tests.library.handler import Handler
@@ -170,6 +173,22 @@ class TestRegularScenario(TestCase):
         artc_event.rebuild(deepcopy(artc))
         Debug().events_published.append(artc_event)
         Debug().events_published.append(tercc_event)
+
+    @patch("etos_suite_runner.lib.esr_parameters.request_artifact_created", return_value=None)
+    def test_controller_mode_fails_when_artifact_is_missing(self, request_artifact_created):
+        """Fail promptly when the controller-provided artifact is not in GraphQL."""
+        artifact_id = "missing-artifact"
+        with patch.dict(os.environ, {"IDENTIFIER": "testrun-id", "ARTIFACT": artifact_id}):
+            etos = ETOS("ETOS Suite Runner", os.getenv("SOURCE_HOST"), "ETOS Suite Runner")
+            parameters = ESRParameters(etos)
+
+            with self.assertRaisesRegex(ArtifactNotFoundException, artifact_id):
+                _ = parameters.iut_id
+
+        request_artifact_created.assert_called_once_with(
+            etos,
+            artifact_id=artifact_id,
+        )
 
     def test_full_scenario(self):
         """Test ESR using 1 suite with 1 sub suite.
