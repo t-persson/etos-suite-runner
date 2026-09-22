@@ -32,7 +32,7 @@ from eiffellib.events import (
 from environment_provider.environment import release_full_environment
 from environment_provider.environment_provider import EnvironmentProvider
 from etos_lib import ETOS
-from etos_lib.kubernetes.schemas.testrun import Suite
+from etos_lib.kubernetes.schemas import Suite
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator

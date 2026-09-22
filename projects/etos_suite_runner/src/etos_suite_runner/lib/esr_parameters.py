@@ -25,8 +25,8 @@ from uuid import uuid4
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from etos_lib import ETOS
 from etos_lib.kubernetes import Environment, Kubernetes, TestRun
-from etos_lib.kubernetes.schemas.environment import Environment as EnvironmentSchema
-from etos_lib.kubernetes.schemas.testrun import Suite
+from etos_lib.kubernetes.schemas import Environment as EnvironmentSchema
+from etos_lib.kubernetes.schemas import Suite
 from packageurl import PackageURL
 
 from .graphql import request_artifact_created

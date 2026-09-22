@@ -21,7 +21,7 @@ dependencies = [
     # etos-lib version is determined by etos-environment-provider;
     # keep this as a loose lower bound to avoid diamond dependency conflicts.
     "etos_lib>=5.4.0,<6.0.0",
-    "etos_environment_provider==5.5.2",
+    "etos_environment_provider==5.5.3",
     "opentelemetry-api~=1.40",
     "opentelemetry-exporter-otlp~=1.40",
     "opentelemetry-sdk~=1.40",

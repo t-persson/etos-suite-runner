@@ -28,7 +28,7 @@ from environment_provider.environment import release_environment
 from environment_provider.lib.registry import ProviderRegistry
 from etos_lib import ETOS
 from etos_lib.kubernetes import Environment, Kubernetes
-from etos_lib.kubernetes.schemas.testrun import Suite
+from etos_lib.kubernetes.schemas import Suite
 from etos_lib.lib.http import Http
 from etos_lib.logging.logger import FORMAT_CONFIG
 from etos_lib.opentelemetry.semconv import Attributes as SemConvAttributes

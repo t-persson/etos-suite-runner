@@ -20,7 +20,7 @@ from multiprocessing.pool import ThreadPool
 
 from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
-from etos_lib.kubernetes.schemas.testrun import Suite
+from etos_lib.kubernetes.schemas import Suite
 from jsontas.jsontas import JsonTas
 import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
