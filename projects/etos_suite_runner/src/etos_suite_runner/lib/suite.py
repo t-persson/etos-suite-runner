@@ -36,6 +36,8 @@ from jsontas.jsontas import JsonTas
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from urllib3.util import Retry
 
+from etos_suite_runner import METRICS
+
 from .esr_parameters import ESRParameters
 from .exceptions import EnvironmentProviderException
 from .executor import Executor, TestStartException
@@ -47,6 +49,7 @@ from .graphql import (
     request_test_suite_started,
 )
 from .log_filter import DuplicateFilter
+from .metrics import publish_event
 from .otel_tracing import OpenTelemetryBase
 
 
@@ -162,6 +165,8 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
             start_timeout = int(os.getenv("ETOS_SUB_SUITE_START_TIMEOUT", "1800"))
             start_deadline = time.time() + start_timeout if self.controller else None
             try:
+                collection_started_at = time.monotonic()
+                collection_outcome = "missing"
                 while timeout is None or time.time() < timeout:
                     time.sleep(10)
                     if not self.started:
@@ -180,8 +185,17 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
                     self.request_finished_event()
                     if self.finished:
                         self.logger.info("ETOS test runner has finished", extra={"user_log": True})
+                        collection_outcome = "received"
                         break
+            except Exception:
+                collection_outcome = "error"
+                raise
             finally:
+                if self.controller:
+                    METRICS.record_result_collection(
+                        collection_outcome,
+                        time.monotonic() - collection_started_at,
+                    )
                 self.release(identifier)
 
     def start(self, identifier: str, otel_context_carrier: dict) -> None:
@@ -469,7 +483,12 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
             "CONTEXT": self.etos.config.get("context"),
             "TERC": self.params.testrun_id,
         }
-        return self.etos.events.send(test_suite_started, links, data)
+        return publish_event(
+            METRICS,
+            "test_suite_started",
+            lambda: self.etos.events.send(test_suite_started, links, data),
+            enabled=self.params.etos_controller,
+        )
 
     def _start(self):
         """Send test suite started, trigger and wait for all sub suites to start."""
@@ -571,10 +590,15 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                 self.etos.config.set("results", [])
                 results = self.etos.config.get("results")
             results.append(outcome)  # type: ignore
-        self.etos.events.send_test_suite_finished(
-            self.test_suite_started,
-            {"CONTEXT": self.etos.config.get("context")},
-            outcome=outcome,
+        publish_event(
+            METRICS,
+            "test_suite_finished",
+            lambda: self.etos.events.send_test_suite_finished(
+                self.test_suite_started,
+                {"CONTEXT": self.etos.config.get("context")},
+                outcome=outcome,
+            ),
+            enabled=self.params.etos_controller,
         )
         self.logger.info("Test suite finished.")
 

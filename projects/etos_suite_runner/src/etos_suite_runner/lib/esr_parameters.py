@@ -45,6 +45,8 @@ class ESRParameters:
         self.etos = etos
         self.issuer = {"name": "ETOS Suite Runner"}
         self.environment_status = {"status": "NOT_STARTED", "error": None}
+        self.__test_run = None
+        self.__test_run_loaded = False
 
     def set_status(self, status: str, error: Optional[str] = None) -> None:
         """Set environment provider status."""
@@ -65,6 +67,22 @@ class ESRParameters:
     def etos_controller(self) -> bool:
         """Whether or not the suite runner is running as a part of the ETOS controller."""
         return os.getenv("IDENTIFIER") is not None
+
+    @property
+    def test_run(self):
+        """Return the controller-managed TestRun, loading it once when available."""
+        if not self.__test_run_loaded:
+            self.__test_run_loaded = True
+            if self.etos_controller and (testrun_name := os.getenv("TESTRUN")) is not None:
+                self.__test_run = TestRun(Kubernetes()).get(testrun_name)
+        return self.__test_run
+
+    @property
+    def api_version(self) -> str:
+        """Return the API version declared by the controller-managed TestRun."""
+        if self.test_run is None:
+            return "unknown"
+        return getattr(self.test_run.spec, "schemaVersion", "unknown") or "unknown"
 
     def _get_id(
         self,
@@ -174,9 +192,8 @@ class ESRParameters:
         """Download and return test batches."""
         with self.lock:
             if self.__test_suite is None:
-                if (testrun_id := os.getenv("TESTRUN")) is not None:
-                    testrun = TestRun(Kubernetes()).get(testrun_id)
-                    self.__test_suite = testrun.spec.suites
+                if os.getenv("TESTRUN") is not None:
+                    self.__test_suite = self.test_run.spec.suites
                 else:
                     tercc = json.loads(os.getenv("TERCC", "{}"))
                     test_suite = self._eiffel_test_suite(tercc)

@@ -44,6 +44,8 @@ from .lib.events import EventPublisher
 from .lib.exceptions import EnvironmentProviderException
 from .lib.graphql import request_tercc
 from .lib.otel_tracing import OpenTelemetryBase, get_current_context
+from . import METRICS
+from .lib.metrics import publish_event
 from .lib.runner import SuiteRunner
 
 # Remove spam from pika.
@@ -68,6 +70,8 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         self.etos = etos
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
+        if self.params.etos_controller and os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
+            METRICS.set_api_version(self.params.api_version)
         FORMAT_CONFIG.identifier = self.params.testrun_id
 
         self.etos.config.rabbitmq_publisher_from_environment()
@@ -76,7 +80,11 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             "WAIT_FOR_ENVIRONMENT_TIMEOUT",
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
-        self.event_publisher = EventPublisher(etos, self.params.testrun_id)
+        self.event_publisher = EventPublisher(
+            etos,
+            self.params.testrun_id,
+            metrics_enabled=self.params.etos_controller,
+        )
 
     def __del__(self):
         """Destructor."""
@@ -245,7 +253,12 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                 daemon=True,
             ).start()
 
-            self.etos.events.send_activity_started(triggered, {"CONTEXT": context})
+            publish_event(
+                METRICS,
+                "activity_started",
+                lambda: self.etos.events.send_activity_started(triggered, {"CONTEXT": context}),
+                enabled=self.params.etos_controller,
+            )
 
             self.logger.info("Starting ESR.")
             runner.start_suites_and_wait(suites)
@@ -276,7 +289,12 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             "selectionStrategy": {"tracker": "Suite Builder", "id": str(uuid4())},
             "batchesUri": os.getenv("SUITE_SOURCE", "Unknown"),
         }
-        self.etos.events.send(event, links, data)
+        publish_event(
+            METRICS,
+            "recipe_collection_created",
+            lambda: self.etos.events.send(event, links, data),
+            enabled=self.params.etos_controller,
+        )
 
     def _run(self):
         """Run the ESR main loop."""
@@ -301,11 +319,16 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                 ]
             }
             self.logger.info("Sending activity triggered for the ETOS testrun")
-            triggered = self.etos.events.send_activity_triggered(
-                activity_name,
-                links,
-                executionType="AUTOMATED",
-                triggers=[{"type": "EIFFEL_EVENT"}],
+            triggered = publish_event(
+                METRICS,
+                "activity_triggered",
+                lambda: self.etos.events.send_activity_triggered(
+                    activity_name,
+                    links,
+                    executionType="AUTOMATED",
+                    triggers=[{"type": "EIFFEL_EVENT"}],
+                ),
+                enabled=self.params.etos_controller,
             )
             self.verify_input()
             context = triggered.meta.event_id
@@ -318,8 +341,13 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
 
         try:
             self.run_suites(triggered)
-            self.etos.events.send_activity_finished(
-                triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
+            publish_event(
+                METRICS,
+                "activity_finished",
+                lambda: self.etos.events.send_activity_finished(
+                    triggered, {"conclusion": "SUCCESSFUL"}, {"CONTEXT": context}
+                ),
+                enabled=self.params.etos_controller,
             )
         except Exception as exception:  # pylint:disable=broad-except
             reason = str(exception)
@@ -327,7 +355,14 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
                 "ETOS suite runner failed to execute test suite",
                 extra={"user_log": True},
             )
-            self.etos.events.send_activity_canceled(triggered, {"CONTEXT": context}, reason=reason)
+            publish_event(
+                METRICS,
+                "activity_canceled",
+                lambda: self.etos.events.send_activity_canceled(
+                    triggered, {"CONTEXT": context}, reason=reason
+                ),
+                enabled=self.params.etos_controller,
+            )
             self._record_exception(exception)
             raise
 

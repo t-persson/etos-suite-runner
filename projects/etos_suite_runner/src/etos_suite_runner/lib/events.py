@@ -24,13 +24,16 @@ from etos_lib.logging.log_publisher import RabbitMQLogPublisher
 from etos_lib.messaging.events import Shutdown
 from etos_lib.messaging.types import Result
 
+from etos_suite_runner import METRICS
+from etos_suite_runner.lib.metrics import publish_event
+
 
 class EventPublisher:
     """EventPublisher helps in sending events to the internal ETOS message bus."""
 
     disabled = False
 
-    def __init__(self, etos: ETOS, identifier: str):
+    def __init__(self, etos: ETOS, identifier: str, metrics_enabled: bool = True):
         """Set up, but do not start, the RabbitMQ publisher."""
         if os.getenv("DISABLE_EVENT_PUBLISHING", "false").lower() == "true":
             self.disabled = True
@@ -50,6 +53,7 @@ class EventPublisher:
         self.v2_publisher = v2_publisher
 
         self.identifier = identifier
+        self.metrics_enabled = metrics_enabled
 
     def __del__(self):
         """Close the RabbitMQ publisher."""
@@ -69,7 +73,13 @@ class EventPublisher:
         if not self.v1_publisher.running:
             self.v1_publisher.start()
         routing_key = f"{self.identifier}.event.{event.get('event')}"
-        self.v1_publisher.send_event(event, routing_key=routing_key)
+        event_class = event.get("event", "other")
+        publish_event(
+            METRICS,
+            event_class,
+            lambda: self.v1_publisher.send_event(event, routing_key=routing_key),
+            enabled=self.metrics_enabled,
+        )
 
     def publish_shutdown(self, result: dict):
         """Publish a shutdown event to the ETOS internal message bus."""
@@ -82,13 +92,19 @@ class EventPublisher:
         # SSEv2
         if self.v2_publisher is None:
             return
-        self.v2_publisher.publish(
-            self.identifier,
-            Shutdown(
-                data=Result(
-                    conclusion=result.get("conclusion"),
-                    verdict=result.get("verdict"),
-                    description=result.get("description"),
-                )
+        event_class = "shutdown"
+        publish_event(
+            METRICS,
+            event_class,
+            lambda: self.v2_publisher.publish(
+                self.identifier,
+                Shutdown(
+                    data=Result(
+                        conclusion=result.get("conclusion"),
+                        verdict=result.get("verdict"),
+                        description=result.get("description"),
+                    )
+                ),
             ),
+            enabled=self.metrics_enabled,
         )
