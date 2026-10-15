@@ -20,7 +20,9 @@ import os
 from importlib.metadata import PackageNotFoundError, version
 
 from etos_lib.logging.logger import setup_logging
+from opentelemetry import metrics
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import (
     SERVICE_NAME,
@@ -32,6 +34,8 @@ from opentelemetry.sdk.resources import (
 )
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
 try:
     VERSION = version("etos_suite_runner")
@@ -63,6 +67,13 @@ if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
     PROCESSOR = BatchSpanProcessor(EXPORTER)
     PROVIDER.add_span_processor(PROCESSOR)
     trace.set_tracer_provider(PROVIDER)
+    METRIC_READER = PeriodicExportingMetricReader(
+        OTLPMetricExporter(),
+        export_interval_millis=5000,
+        export_timeout_millis=5000,
+    )
+    METER_PROVIDER = MeterProvider(resource=OTEL_RESOURCE, metric_readers=[METRIC_READER])
+    metrics.set_meter_provider(METER_PROVIDER)
     setup_logging("ETOS Suite Runner", VERSION, otel_resource=OTEL_RESOURCE)
 else:
     setup_logging("ETOS Suite Runner", VERSION)

@@ -25,6 +25,7 @@ import traceback
 from etos_lib import ETOS
 
 from .esr import ESR
+from .lib.otel_tracing import flush
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ def main():
     finally:
         esr.etos.publisher.wait_for_unpublished_events()
         esr.etos.publisher.stop()
+        flush()
     LOGGER.info("ESR Finished Executing.")
 
 

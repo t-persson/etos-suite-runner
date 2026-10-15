@@ -47,7 +47,13 @@ from .graphql import (
     request_test_suite_started,
 )
 from .log_filter import DuplicateFilter
-from .otel_tracing import OpenTelemetryBase
+from .otel_tracing import (
+    OpenTelemetryBase,
+    api_version_for,
+    api_version_for_controller,
+    milestone_span,
+    record_milestone,
+)
 
 
 class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
@@ -62,6 +68,7 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
         self.environment = environment
         self.main_suite_id = main_suite_id
         self.controller = controller
+        self.api_version = api_version_for_controller(controller)
         self.logger = logging.getLogger(f"SubSuite - {self.environment.get('name')}")
         self.logger.addFilter(DuplicateFilter(self.logger))
         self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
@@ -125,15 +132,20 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
         return {}
 
     def _start(self, identifier: str) -> None:
-        """Start ETR for this sub suite.
+        """Observe ETR results, launching ETR only outside controller mode.
 
         :param identifier: An identifier for logs in this sub suite.
         """
-        span_name = "execute_testrunner"
+        span_name = (
+            "etos.suite_runner.sub_suite.observe"
+            if self.controller
+            else "etos.suite_runner.sub_suite.execute"
+        )
         with self.otel_tracer.start_as_current_span(
             span_name,
             kind=opentelemetry.trace.SpanKind.CLIENT,
         ) as span:
+            record_milestone(span, "sub_suite.started", "sub_suite")
             span.set_attribute(SemConvAttributes.SUBSUITE_ID, identifier)
             FORMAT_CONFIG.identifier = identifier
             self.logger.info("Starting up the ETOS test runner", extra={"user_log": True})
@@ -182,6 +194,16 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
                         self.logger.info("ETOS test runner has finished", extra={"user_log": True})
                         break
             finally:
+                conclusion = self.outcome().get("conclusion", "").lower()
+                if conclusion not in {"successful", "failed"}:
+                    conclusion = "unknown"
+                span.set_attribute("etos.conclusion", conclusion)
+                record_milestone(
+                    span,
+                    "sub_suite.finished",
+                    "sub_suite",
+                    conclusion if self.finished else "incomplete",
+                )
                 self.release(identifier)
 
     def start(self, identifier: str, otel_context_carrier: dict) -> None:
@@ -244,6 +266,15 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
         else:
             success = self._release_environment(testrun_id)
 
+        with milestone_span(
+            self.otel_tracer,
+            "etos.suite_runner.sub_suite.cleanup",
+            "cleanup",
+            api_version=self.api_version,
+            outcome="completed" if success else "failed",
+        ):
+            pass
+
         if not success:
             self.logger.exception(
                 "Failed to check in %r", self.environment["id"], extra={"user_log": True}
@@ -278,6 +309,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         self.test_suite_started_id = test_suite_started_id
         self.logger = logging.getLogger(f"TestSuite - {self.suite.name}")
         self.logger.addFilter(DuplicateFilter(self.logger))
+        self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
         self.sub_suites = []
 
         if otel_context_carrier is None:
@@ -500,12 +532,23 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                     self.params.etos_controller,
                 )
                 self.sub_suites.append(sub_suite)
-                thread = threading.Thread(
-                    target=sub_suite.start,
-                    args=(self.params.testrun_id, self.otel_context_carrier),
+                phase = (
+                    "sub_suite.observation" if self.params.etos_controller else "sub_suite.dispatch"
                 )
-                threads.append(thread)
-                thread.start()
+                with milestone_span(
+                    self.otel_tracer,
+                    f"etos.suite_runner.{phase}",
+                    phase,
+                    api_version=api_version_for(self.params),
+                ):
+                    carrier = {}
+                    TraceContextTextMapPropagator().inject(carrier)
+                    thread = threading.Thread(
+                        target=sub_suite.start,
+                        args=(self.params.testrun_id, carrier),
+                    )
+                    threads.append(thread)
+                    thread.start()
             self.logger.info(
                 "All sub suites for %r (%r) have now been triggered",
                 self.suite.name,
@@ -538,7 +581,11 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         """
         # OpenTelemetry contexts aren't automatically propagated to threads.
         # For this reason OpenTelemetry context needs to be reinstantiated here.
-        otel_context = TraceContextTextMapPropagator().extract(carrier=self.otel_context_carrier)
+        otel_context = opentelemetry.context.get_current()
+        if not opentelemetry.trace.get_current_span(otel_context).get_span_context().is_valid:
+            otel_context = TraceContextTextMapPropagator().extract(
+                carrier=self.otel_context_carrier
+            )
         otel_context_token = opentelemetry.context.attach(otel_context)
         try:
             self._start()
@@ -571,11 +618,19 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                 self.etos.config.set("results", [])
                 results = self.etos.config.get("results")
             results.append(outcome)  # type: ignore
-        self.etos.events.send_test_suite_finished(
-            self.test_suite_started,
-            {"CONTEXT": self.etos.config.get("context")},
-            outcome=outcome,
-        )
+        with milestone_span(
+            self.otel_tracer,
+            "etos.suite_runner.terminal",
+            "terminal",
+            api_version=api_version_for(self.params),
+            outcome=conclusion.lower(),
+        ) as span:
+            span.set_attribute("etos.test_verdict", verdict.lower())
+            self.etos.events.send_test_suite_finished(
+                self.test_suite_started,
+                {"CONTEXT": self.etos.config.get("context")},
+                outcome=outcome,
+            )
         self.logger.info("Test suite finished.")
 
     def results(self) -> tuple[str, str, str]:

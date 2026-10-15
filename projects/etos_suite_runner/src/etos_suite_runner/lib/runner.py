@@ -26,7 +26,13 @@ import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from .exceptions import EnvironmentProviderException
-from .otel_tracing import get_current_context, OpenTelemetryBase
+from .otel_tracing import (
+    api_version_for,
+    get_current_context,
+    milestone_span,
+    OpenTelemetryBase,
+    record_milestone,
+)
 from .suite import TestSuite
 
 
@@ -73,27 +79,49 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
 
     def start_suites_and_wait(self, suites: list[tuple[str, Suite]]):
         """Get environments and start all test suites."""
-        try:
-            otel_context_carrier = {}
-            TraceContextTextMapPropagator().inject(otel_context_carrier)
-            test_suites = [
-                TestSuite(
-                    self.etos, self.params, suite, id, otel_context_carrier=otel_context_carrier
+        with milestone_span(
+            self.otel_tracer,
+            "etos.suite_runner",
+            "suite_runner",
+            context=self.otel_suite_context,
+            api_version=api_version_for(self.params),
+        ) as span:
+            try:
+                record = {"phase": "suite_runner.dispatch"}
+                span.add_event("suite_runner.dispatch.started", attributes=record)
+                otel_context_carrier = {}
+                TraceContextTextMapPropagator().inject(otel_context_carrier)
+                test_suites = [
+                    TestSuite(
+                        self.etos, self.params, suite, id, otel_context_carrier=otel_context_carrier
+                    )
+                    for id, suite in suites
+                ]
+                with ThreadPool() as pool:
+                    pool.map(self.run, test_suites)
+                span.add_event(
+                    "suite_runner.dispatch.finished",
+                    attributes={"phase": "suite_runner.dispatch", "outcome": "completed"},
                 )
-                for id, suite in suites
-            ]
-            with ThreadPool() as pool:
-                pool.map(self.run, test_suites)
-            status = self.params.get_status()
-            if status.get("error") is not None:
-                exc = EnvironmentProviderException(status["error"], self.etos.config.get("task_id"))
-                self._record_exception(exc)
-                raise exc
-        finally:
-            # Not running as part of controller
-            if not self.params.etos_controller:
-                self.logger.info("Release the full test environment.")
-                self._release_environment()
+                status = self.params.get_status()
+                if status.get("error") is not None:
+                    exc = EnvironmentProviderException(
+                        status["error"], self.etos.config.get("task_id")
+                    )
+                    self._record_exception(exc)
+                    raise exc
+            finally:
+                # Not running as part of controller
+                if not self.params.etos_controller:
+                    self.logger.info("Release the full test environment.")
+                    with milestone_span(
+                        self.otel_tracer,
+                        "etos.suite_runner.cleanup",
+                        "cleanup",
+                        context=self.otel_suite_context,
+                        api_version=api_version_for(self.params),
+                    ):
+                        self._release_environment()
 
     def run(self, test_suite):
         """Run test suite runner.
@@ -110,12 +138,27 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
         )
         otel_context_token = opentelemetry.context.attach(otel_context)
         try:
-            try:
-                test_suite.start()  # send EiffelTestSuiteStartedEvent
-                # All sub suites finished.
-            finally:
-                results = test_suite.results()
-                test_suite.finish(*results)  # send EiffelTestSuiteFinishedEvent
-                test_suite.release_all()
+            with milestone_span(
+                self.otel_tracer,
+                "etos.suite_runner.sub_suite",
+                "sub_suite",
+                api_version=api_version_for(self.params),
+            ) as span:
+                try:
+                    test_suite.start()  # send EiffelTestSuiteStartedEvent
+                    # All sub suites finished.
+                finally:
+                    results = test_suite.results()
+                    outcome = results[1].lower() if results else "unknown"
+                    span.set_attribute("etos.outcome", outcome)
+                    record_milestone(span, "sub_suite.terminal", "sub_suite", outcome)
+                    test_suite.finish(*results)  # send EiffelTestSuiteFinishedEvent
+                    with milestone_span(
+                        self.otel_tracer,
+                        "etos.suite_runner.cleanup",
+                        "cleanup",
+                        api_version=api_version_for(self.params),
+                    ):
+                        test_suite.release_all()
         finally:
             opentelemetry.context.detach(otel_context_token)
