@@ -24,6 +24,7 @@ from opentelemetry import metrics
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.system_metrics import SystemMetricsInstrumentor
 from opentelemetry.sdk.resources import (
     SERVICE_NAME,
     SERVICE_VERSION,
@@ -38,7 +39,7 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
 try:
-    VERSION = version("etos_suite_runner")
+    VERSION = os.getenv("BUILD_REVISION") or version("etos_suite_runner")
 except PackageNotFoundError:
     VERSION = "Unknown"
 
@@ -74,6 +75,7 @@ if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
     )
     METER_PROVIDER = MeterProvider(resource=OTEL_RESOURCE, metric_readers=[METRIC_READER])
     metrics.set_meter_provider(METER_PROVIDER)
+    SystemMetricsInstrumentor().instrument(meter_provider=METER_PROVIDER)
     setup_logging("ETOS Suite Runner", VERSION, otel_resource=OTEL_RESOURCE)
 else:
     setup_logging("ETOS Suite Runner", VERSION)
