@@ -18,6 +18,7 @@
 import json
 import logging
 import os
+from dataclasses import dataclass
 from threading import Lock
 from typing import Optional, Union
 from uuid import uuid4
@@ -25,12 +26,24 @@ from uuid import uuid4
 from eiffellib.events import EiffelTestExecutionRecipeCollectionCreatedEvent
 from etos_lib import ETOS
 from etos_lib.kubernetes import Environment, Kubernetes, TestRun
-from etos_lib.kubernetes.schemas import Environment as EnvironmentSchema
-from etos_lib.kubernetes.schemas import Suite
+from etos_lib.kubernetes.schemas.v1beta1.environment import Environment as EnvironmentSchema
+from etos_lib.kubernetes.schemas.v1beta1.testrun import (
+    Suite as TestRunSuite,
+    TestExecution as TestRunExecution,
+)
+from etos_lib.schemas.v0.environment import Recipe as V0Recipe
 from packageurl import PackageURL
 
 from .exceptions import ArtifactNotFoundException
 from .graphql import request_artifact_created
+
+
+@dataclass
+class SuiteDefinition:
+    """A v1beta1 suite paired with its Eiffel test-suite event name."""
+
+    name: str
+    suite: TestRunSuite
 
 
 class ESRParameters:
@@ -88,7 +101,7 @@ class ESRParameters:
 
     def environments(self, test_suite_started_id: str) -> list[EnvironmentSchema]:
         """Environments to run tests in."""
-        environment_client = Environment(Kubernetes())
+        environment_client = Environment(Kubernetes(version="v1beta1"))
         label_selector = (
             f"etos.eiffel-community.github.io/id={self.testrun_id},"
             f"etos.eiffel-community.github.io/suite-id={test_suite_started_id}"
@@ -170,19 +183,35 @@ class ESRParameters:
         return self.etos.config.get("tercc")
 
     @property
-    def test_suite(self) -> list[Suite]:
+    def test_suite(self) -> list[SuiteDefinition]:
         """Download and return test batches."""
         with self.lock:
             if self.__test_suite is None:
                 if (testrun_id := os.getenv("TESTRUN")) is not None:
-                    testrun = TestRun(Kubernetes()).get(testrun_id)
-                    self.__test_suite = testrun.spec.suites
+                    testrun = TestRun(Kubernetes(version="v1beta1")).get(testrun_id).to_dict()
+                    self.__test_suite = [
+                        SuiteDefinition(
+                            name=testrun["spec"]["name"],
+                            suite=TestRunSuite.model_validate(suite),
+                        )
+                        for suite in testrun["spec"]["suites"]
+                    ]
                 else:
                     tercc = json.loads(os.getenv("TERCC", "{}"))
-                    test_suite = self._eiffel_test_suite(tercc)
-                    # The dataset is not necessary for the suite runner.
-                    test_suite = [Suite.from_tercc(suite, {}) for suite in test_suite]
-                    self.__test_suite = test_suite
+                    self.__test_suite = [
+                        SuiteDefinition(
+                            name=suite.get("name", "NoName"),
+                            suite=TestRunSuite(
+                                priority=suite.get("priority", 1),
+                                dataset={},
+                                testExecutions=[
+                                    TestRunExecution.convert_from(V0Recipe.model_validate(recipe))
+                                    for recipe in suite.get("recipes", [])
+                                ],
+                            ),
+                        )
+                        for suite in self._eiffel_test_suite(tercc)
+                    ]
         return self.__test_suite or []
 
     def _eiffel_test_suite(self, tercc: dict) -> list[dict]:

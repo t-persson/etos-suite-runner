@@ -28,7 +28,6 @@ from environment_provider.environment import release_environment
 from environment_provider.lib.registry import ProviderRegistry
 from etos_lib import ETOS
 from etos_lib.kubernetes import Environment, Kubernetes
-from etos_lib.kubernetes.schemas import Suite
 from etos_lib.lib.http import Http
 from etos_lib.logging.logger import FORMAT_CONFIG
 from etos_lib.opentelemetry.semconv import Attributes as SemConvAttributes
@@ -36,7 +35,7 @@ from jsontas.jsontas import JsonTas
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from urllib3.util import Retry
 
-from .esr_parameters import ESRParameters
+from .esr_parameters import ESRParameters, SuiteDefinition
 from .exceptions import EnvironmentProviderException
 from .executor import Executor, TestStartException
 from .graphql import (
@@ -224,7 +223,7 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
     def _delete_environment(self) -> bool:
         """Delete environment from Kubernetes."""
         environment_name = self.environment.get("executor", {}).get("id")
-        environment_client = Environment(Kubernetes())
+        environment_client = Environment(Kubernetes(version="v1beta1"))
         return environment_client.delete(environment_name)
 
     def _release_environment(self, testrun_id: str):
@@ -298,16 +297,17 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         self,
         etos: ETOS,
         params: ESRParameters,
-        suite: Suite,
+        suite: SuiteDefinition,
         test_suite_started_id: str,
         otel_context_carrier: Union[dict, None] = None,
     ) -> None:
         """Initialize a TestSuite instance."""
         self.etos = etos
         self.params = params
-        self.suite = suite
+        self.suite = suite.suite
+        self.suite_name = suite.name
         self.test_suite_started_id = test_suite_started_id
-        self.logger = logging.getLogger(f"TestSuite - {self.suite.name}")
+        self.logger = logging.getLogger(f"TestSuite - {self.suite_name}")
         self.logger.addFilter(DuplicateFilter(self.logger))
         self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
         self.sub_suites = []
@@ -387,14 +387,14 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         while time.time() < timeout:
             time.sleep(5)
             for environment in self.params.environments(self.test_suite_started_id):
-                if environment.spec.sub_suite_id in environments:
+                if environment.spec.id in environments:
                     continue
 
-                environments.append(environment.spec.sub_suite_id)
+                environments.append(environment.spec.id)
                 executor = environment.spec.executor
                 yield {
                     "executor": executor,
-                    "id": environment.spec.sub_suite_id,
+                    "id": environment.spec.id,
                     "name": environment.spec.name,
                 }
             status = self.params.get_status()
@@ -493,7 +493,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         # This ID has been stored in Environment so that the ETR know which test suite to link to.
         test_suite_started.meta.event_id = self.test_suite_started_id
         data = {
-            "name": self.suite.name,
+            "name": self.suite_name,
             "categories": categories,
             "types": ["FUNCTIONAL"],
         }
@@ -507,7 +507,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         """Send test suite started, trigger and wait for all sub suites to start."""
         self.test_suite_started = self._send_test_suite_started()
         self.logger.info("Test suite started %r", self.test_suite_started.meta.event_id)
-        if len(self.suite.tests) == 0:
+        if len(self.suite.testExecutions) == 0:
             self.logger.error("Not recipes found in test suite. Exiting.")
             self.empty = True
             return
@@ -517,7 +517,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
         try:
             self.logger.info(
                 "Waiting for an environment for %r (%r)",
-                self.suite.name,
+                self.suite_name,
                 self.test_suite_started.meta.event_id,
                 extra={"user_log": True},
             )
@@ -551,13 +551,13 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                     thread.start()
             self.logger.info(
                 "All sub suites for %r (%r) have now been triggered",
-                self.suite.name,
+                self.suite_name,
                 self.test_suite_started.meta.event_id,
                 extra={"user_log": True},
             )
             self.logger.info(
                 "Total count of sub suites for %r (%r): %d",
-                self.suite.name,
+                self.suite_name,
                 self.test_suite_started.meta.event_id,
                 len(self.sub_suites),
                 extra={"user_log": True},
@@ -569,7 +569,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
 
         self.logger.info(
             "All sub suites for %r (%r) have now finished",
-            self.suite.name,
+            self.suite_name,
             self.test_suite_started.meta.event_id,
             extra={"user_log": True},
         )
@@ -676,7 +676,7 @@ class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribut
                 description = "No description received from ESR or ETR."
         self.logger.info(
             "Test suite result for %r (%r): %r,%r,%r",
-            self.suite.name,
+            self.suite_name,
             self.test_suite_started.meta.event_id,
             verdict,
             conclusion,

@@ -20,11 +20,11 @@ from multiprocessing.pool import ThreadPool
 
 from environment_provider.environment import release_full_environment
 from etos_lib.logging.logger import FORMAT_CONFIG
-from etos_lib.kubernetes.schemas import Suite
 from jsontas.jsontas import JsonTas
 import opentelemetry
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
+from .esr_parameters import SuiteDefinition
 from .exceptions import EnvironmentProviderException
 from .otel_tracing import (
     api_version_for,
@@ -77,7 +77,7 @@ class SuiteRunner(OpenTelemetryBase):  # pylint:disable=too-few-public-methods
             if not status:
                 self.logger.error(message)
 
-    def start_suites_and_wait(self, suites: list[tuple[str, Suite]]):
+    def start_suites_and_wait(self, suites: list[tuple[str, SuiteDefinition]]):
         """Get environments and start all test suites."""
         with milestone_span(
             self.otel_tracer,

@@ -32,14 +32,13 @@ from eiffellib.events import (
 from environment_provider.environment import release_full_environment
 from environment_provider.environment_provider import EnvironmentProvider
 from etos_lib import ETOS
-from etos_lib.kubernetes.schemas import Suite
 from etos_lib.logging.logger import FORMAT_CONFIG
 from jsontas.jsontas import JsonTas
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 from etos_suite_runner.lib.result import Result
 
-from .lib.esr_parameters import ESRParameters
+from .lib.esr_parameters import ESRParameters, SuiteDefinition
 from .lib.events import EventPublisher
 from .lib.exceptions import EnvironmentProviderException
 from .lib.graphql import request_tercc
@@ -226,7 +225,7 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         self.etos.config.set("context", context)
         self.logger.info("Sending ESR Docker environment event.")
         runner = SuiteRunner(self.params, self.etos)
-        suites: list[tuple[str, Suite]] = []
+        suites: list[tuple[str, SuiteDefinition]] = []
         ids = self.params.main_suite_ids()
         for i, suite in enumerate(self.params.test_suite):
             suites.append((ids[i], suite))

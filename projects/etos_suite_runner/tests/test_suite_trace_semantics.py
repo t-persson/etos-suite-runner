@@ -16,13 +16,14 @@
 """Regression tests for suite-runner observation and trace ancestry."""
 
 from unittest import TestCase, mock
-from types import SimpleNamespace
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
+from etos_lib.kubernetes.schemas.v1beta1.testrun import Suite as V1Beta1Suite
+from etos_suite_runner.lib.esr_parameters import SuiteDefinition
 from etos_suite_runner.lib.suite import SubSuite, TestSuite as SuiteHandler
 
 
@@ -65,7 +66,7 @@ class TestSuiteTraceSemantics(TestCase):
         handler = SuiteHandler(
             mock.Mock(),
             mock.Mock(),
-            SimpleNamespace(name="suite"),
+            SuiteDefinition("suite", V1Beta1Suite(testExecutions=[])),
             "main",
             {"traceparent": "00-aaaabbbbccccddddeeeeffff00001111-1234567890abcdef-01"},
         )
