@@ -21,7 +21,7 @@ from unittest.mock import Mock, call, patch
 from etos_lib.kubernetes.schemas.v1beta1.environment import Environment as V1Beta1Environment
 from etos_lib.kubernetes.schemas.v1beta1.testrun import Suite as V1Beta1Suite
 from etos_suite_runner.lib.esr_parameters import ESRParameters, SuiteDefinition
-from etos_suite_runner.lib.suite import SubSuite, TestSuite
+from etos_suite_runner.lib.suite import SubSuite, TestSuite as SuiteHandler
 
 
 def test_testrun_and_environment_clients_use_v1beta1(monkeypatch):
@@ -29,7 +29,7 @@ def test_testrun_and_environment_clients_use_v1beta1(monkeypatch):
     monkeypatch.setattr(ESRParameters, "_ESRParameters__test_suite", None)
     monkeypatch.setenv("TESTRUN", "testrun-id")
     etos = Mock()
-    etos.config.get.side_effect = lambda key: {"testrun_id": "testrun-id"}.get(key)
+    etos.config.get.side_effect = {"testrun_id": "testrun-id"}.get
     parameters = ESRParameters(etos)
     environment_client = Mock()
     environment_client.namespace = "namespace"
@@ -113,7 +113,7 @@ def test_testrun_and_environment_clients_use_v1beta1(monkeypatch):
         patch("etos_suite_runner.lib.suite.Environment") as environment_resource,
     ):
         environment_resource.return_value.delete.return_value = True
-        assert environment._delete_environment()
+        assert environment._delete_environment()  # pylint: disable=protected-access
 
     kubernetes.assert_called_once_with(version="v1beta1")
 
@@ -162,7 +162,7 @@ def test_tercc_recipes_convert_to_v1beta1_suites(monkeypatch):
     assert suite.suite.testExecutions[0].environment.environmentVariables == {"KEY": "value"}
 
 
-def test_controller_suite_uses_v1beta1_environment_id(monkeypatch):
+def test_controller_suite_uses_v1beta1_environment_id():
     """Use the v1beta1 Environment spec's id when collecting sub-suites."""
     environment = V1Beta1Environment.model_validate(
         {
@@ -189,7 +189,7 @@ def test_controller_suite_uses_v1beta1_environment_id(monkeypatch):
     parameters.etos_controller = True
     parameters.environments.return_value = [environment]
     parameters.get_status.return_value = {"status": "SUCCESS"}
-    suite = TestSuite(
+    suite = SuiteHandler(
         etos,
         parameters,
         SuiteDefinition("suite", V1Beta1Suite(testExecutions=[])),
