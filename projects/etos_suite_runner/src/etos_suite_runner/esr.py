@@ -64,7 +64,6 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
         self.logger = logging.getLogger("ESR")
         self.otel_tracer = opentelemetry.trace.get_tracer(__name__)
         self.otel_context = get_current_context()
-        self.otel_context_token = opentelemetry.context.attach(self.otel_context)
         self.etos = etos
         signal.signal(signal.SIGTERM, self.graceful_exit)
         self.params = ESRParameters(self.etos)
@@ -77,11 +76,6 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             int(os.getenv("ESR_WAIT_FOR_ENVIRONMENT_TIMEOUT")),
         )
         self.event_publisher = EventPublisher(etos, self.params.testrun_id)
-
-    def __del__(self):
-        """Destructor."""
-        if self.otel_context_token is not None:
-            opentelemetry.context.detach(self.otel_context_token)
 
     def __environment_request_status(self) -> None:
         """Continuously check environment request status."""
@@ -365,19 +359,23 @@ class ESR(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes
             conclusion="Failed",
             description="ESR did not execute",
         )
-        try:
-            self._run()
-            result = self.result()
-            return result
-        except Exception:  # pylint:disable=bare-except
-            result = Result(
-                conclusion="Failed",
-                verdict="Inconclusive",
-                description=traceback.format_exc(),
-            )
-            raise
-        finally:
-            self.event_publisher.publish_shutdown(result.model_dump())
+        with self.otel_tracer.start_as_current_span(
+            "etos.suite_runner.run",
+            context=self.otel_context,
+        ):
+            try:
+                self._run()
+                result = self.result()
+                return result
+            except Exception:  # pylint:disable=bare-except
+                result = Result(
+                    conclusion="Failed",
+                    verdict="Inconclusive",
+                    description=traceback.format_exc(),
+                )
+                raise
+            finally:
+                self.event_publisher.publish_shutdown(result.model_dump())
 
     def graceful_exit(self, *_) -> None:
         """Attempt to gracefully exit the running job."""

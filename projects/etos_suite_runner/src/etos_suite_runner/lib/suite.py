@@ -257,31 +257,32 @@ class SubSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attribute
 
     def release(self, testrun_id) -> None:
         """Release this sub suite."""
-        self.logger.info(
-            "Check in test environment %r", self.environment["id"], extra={"user_log": True}
-        )
-        # Running as part of ETOS controller
-        if self.controller:
-            success = self._delete_environment()
-        else:
-            success = self._release_environment(testrun_id)
-
+        success = False
         with milestone_span(
             self.otel_tracer,
             "etos.suite_runner.sub_suite.cleanup",
             "cleanup",
             api_version=self.api_version,
-            outcome="completed" if success else "failed",
+            outcome=lambda: "completed" if success else "failed",
         ):
-            pass
-
-        if not success:
-            self.logger.exception(
-                "Failed to check in %r", self.environment["id"], extra={"user_log": True}
+            self.logger.info(
+                "Check in test environment %r",
+                self.environment["id"],
+                extra={"user_log": True},
             )
-            return
-        self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
-        self.released = True
+            # Running as part of ETOS controller
+            if self.controller:
+                success = self._delete_environment()
+            else:
+                success = self._release_environment(testrun_id)
+
+            if not success:
+                self.logger.exception(
+                    "Failed to check in %r", self.environment["id"], extra={"user_log": True}
+                )
+                return
+            self.logger.info("Checked in %r", self.environment["id"], extra={"user_log": True})
+            self.released = True
 
 
 class TestSuite(OpenTelemetryBase):  # pylint:disable=too-many-instance-attributes

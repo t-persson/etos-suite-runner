@@ -21,6 +21,7 @@ import logging
 import os
 import time
 from contextlib import contextmanager
+from typing import Callable
 
 import opentelemetry
 from opentelemetry import metrics, trace
@@ -100,7 +101,7 @@ def milestone_span(  # pylint:disable=too-many-arguments
     *,
     context=None,
     api_version: str | None = None,
-    outcome: str | None = None,
+    outcome: str | Callable[[], str] | None = None,
 ):
     """Create a bounded span for a suite-runner lifecycle milestone."""
     with tracer.start_as_current_span(name, context=context) as span:
@@ -108,7 +109,7 @@ def milestone_span(  # pylint:disable=too-many-arguments
         span.set_attribute(TRACE_PHASE, phase)
         if api_version is not None:
             span.set_attribute(TRACE_API_VERSION, api_version)
-        if outcome is not None:
+        if isinstance(outcome, str):
             span.set_attribute(TRACE_OUTCOME, outcome)
         record_milestone(span, f"{phase}.started", phase)
         try:  # pylint:disable=no-else-raise
@@ -125,13 +126,14 @@ def milestone_span(  # pylint:disable=too-many-arguments
             OpenTelemetryBase._record_exception(exc)  # pylint:disable=protected-access
             raise
         else:
-            if outcome is not None:
-                span.set_attribute(TRACE_OUTCOME, outcome)
+            resolved_outcome = outcome() if callable(outcome) else outcome
+            if resolved_outcome is not None:
+                span.set_attribute(TRACE_OUTCOME, resolved_outcome)
             record_milestone(
                 span,
                 f"{phase}.finished",
                 phase,
-                outcome,
+                resolved_outcome,
                 (time.monotonic() - started_at) * 1000,
             )
 
